@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpyServer</title>
+<link rel="stylesheet" href="leaflet/leaflet.css">
+<script src="leaflet/leaflet.js"></script>
+<style>
+  :root {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #1a1d21; --muted: #68707a; --line: #e2e5e9;
+    --accent: #1d6fd8; --accent-soft: #dce9fb; --live: #16833a; --live-soft: #d8f0df;
+    --warn: #b7791f; --bad: #c9302c; --bar: #1d6fd8;
+    --mono: ui-monospace, "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1014; --panel: #161a20; --text: #e4e8ee; --muted: #8a939e; --line: #262c34;
+      --accent: #5b9dff; --accent-soft: #1a2a42; --live: #3fbf62; --live-soft: #15301d;
+      --warn: #d9a440; --bad: #f0605a; --bar: #4f8fe8;
+    }
+    .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.88) saturate(.6); }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 20px 16px 40px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-bottom: 16px; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+  h1 small { display: block; font-size: 12.5px; font-weight: 400; color: var(--muted); }
+  .spacer { flex: 1; }
+  .pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px;
+    background: var(--panel); border: 1px solid var(--line); font-size: 13px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
+  .dot.on { background: var(--live); box-shadow: 0 0 0 3px var(--live-soft); }
+  .dot.off { background: var(--bad); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .seg button { border: 0; background: none; color: var(--text); padding: 6px 12px; font: inherit; cursor: pointer; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+  .live { display: none; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 16px;
+    border-radius: 10px; background: var(--live-soft); border: 1px solid color-mix(in srgb, var(--live) 35%, transparent); }
+  .live.show { display: flex; }
+  .live b { font-weight: 650; }
+  .live .freq { font-family: var(--mono); font-size: 18px; font-weight: 600; }
+
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
+  .kpi .v { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+  .kpi .l { color: var(--muted); font-size: 12.5px; }
+
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; min-width: 0; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+  #map { height: 460px; border-radius: 8px; z-index: 0; }
+  .map-panel { padding: 8px; margin-bottom: 16px; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 16px; }
+
+  .bars { display: grid; gap: 6px; }
+  .bar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; font-size: 13px; }
+  .bar .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .val { color: var(--muted); font-variant-numeric: tabular-nums; text-align: right; }
+  .bar .track { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--line); overflow: hidden; }
+  .bar .fill { height: 100%; background: var(--bar); border-radius: 3px; }
+  .empty { color: var(--muted); font-size: 13px; padding: 8px 0; }
+
+  .cols { display: flex; align-items: flex-end; gap: 3px; height: 120px; padding-top: 6px; }
+  .cols .c { flex: 1; background: var(--bar); border-radius: 3px 3px 0 0; min-height: 2px; position: relative; opacity: .9; }
+  .cols .c:hover { opacity: 1; outline: 2px solid var(--accent-soft); }
+  .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11.5px; margin-top: 4px; font-variant-numeric: tabular-nums; }
+
+  .table-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .table-head h2 { margin: 0; }
+  input[type=search] { flex: 0 1 260px; margin-left: auto; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--bg); color: var(--text); font: inherit; }
+  .tbl { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 12px; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  td { padding: 7px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:hover td { background: color-mix(in srgb, var(--accent-soft) 45%, transparent); }
+  tr.clickable { cursor: pointer; }
+  .mono { font-family: var(--mono); font-size: 12.5px; }
+  .muted { color: var(--muted); }
+  .chip { display: inline-block; font-family: var(--mono); font-size: 11.5px; padding: 1px 6px; border-radius: 5px;
+    background: var(--accent-soft); color: var(--accent); margin: 1px 3px 1px 0; white-space: nowrap; }
+  .chip small { opacity: .7; font-family: system-ui, sans-serif; margin-left: 4px; }
+  .expand { border: 1px solid var(--line); background: var(--panel); color: var(--accent); border-radius: 5px;
+    font: 600 11.5px system-ui, sans-serif; padding: 1px 6px; cursor: pointer; white-space: nowrap; }
+  tr.detail td { background: var(--bg); padding: 8px 10px 12px; }
+  tr.detail:hover td { background: var(--bg); }
+  .tl { display: grid; grid-template-columns: auto auto auto 1fr; gap: 2px 14px; font-size: 12.5px; max-height: 320px; overflow: auto; }
+  .tl .h { color: var(--muted); font-size: 11.5px; font-weight: 600; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 5px; margin-right: 4px; font-weight: 600; white-space: nowrap; }
+  .tag.dc { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  .tag.many { background: color-mix(in srgb, var(--bad) 15%, transparent); color: var(--bad); }
+  .tag.live { background: var(--live-soft); color: var(--live); }
+  .foot { color: var(--muted); font-size: 12px; margin-top: 14px; }
+  .more { margin-left: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--accent);
+    border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+  .leaflet-popup-content { font: 13px/1.45 system-ui, sans-serif; }
+  .leaflet-popup-content b { font-weight: 650; }
+  .lang { display: inline-flex; gap: 4px; }
+  .lang button { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 4px; cursor: pointer;
+    line-height: 0; opacity: .55; }
+  .lang button:hover { opacity: .85; }
+  .lang button.active { opacity: 1; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+  .lang svg { width: 24px; height: 16px; display: block; border-radius: 2px; }
+  .foot a { color: inherit; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><span data-i18n="title"></span><small id="station-desc">&nbsp;</small></h1>
+    <div class="spacer"></div>
+    <span class="pill"><span class="dot" id="srv-dot"></span><span id="srv-text"></span></span>
+    <div class="seg" id="range">
+      <button data-days="1" data-i18n="r24h"></button>
+      <button data-days="7" class="active" data-i18n="r7d"></button>
+      <button data-days="30" data-i18n="r30d"></button>
+      <button data-days="0" data-i18n="rAll"></button>
+    </div>
+    <div class="lang" id="lang">
+      <button data-lang="cs" title="Čeština" aria-label="Čeština"><svg viewBox="0 0 6 4"><rect width="6" height="4" fill="#d7141a"/><rect width="6" height="2" fill="#fff"/><path d="M0 0 3 2 0 4z" fill="#11457e"/></svg></button>
+      <button data-lang="en" title="English" aria-label="English"><svg viewBox="0 0 60 30"><clipPath id="uk-s"><path d="M0 0v30h60V0z"/></clipPath><clipPath id="uk-t"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath><g clip-path="url(#uk-s)"><path d="M0 0v30h60V0z" fill="#012169"/><path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/><path d="M0 0l60 30m0-30L0 30" clip-path="url(#uk-t)" stroke="#C8102E" stroke-width="4"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#C8102E" stroke-width="6"/></g></svg></button>
+    </div>
+  </header>
+
+  <div class="live" id="live"></div>
+
+  <div class="kpis">
+    <div class="kpi"><div class="v" id="k-sessions">–</div><div class="l" data-i18n="kSessions"></div></div>
+    <div class="kpi"><div class="v" id="k-ips">–</div><div class="l" data-i18n="kIPs"></div></div>
+    <div class="kpi"><div class="v" id="k-countries">–</div><div class="l" data-i18n="kCountries"></div></div>
+    <div class="kpi"><div class="v" id="k-total">–</div><div class="l" data-i18n="kTotal"></div></div>
+    <div class="kpi"><div class="v" id="k-avg">–</div><div class="l" data-i18n="kAvg"></div></div>
+  </div>
+
+  <div class="panel map-panel"><div id="map"></div></div>
+
+  <div class="grid">
+    <div class="panel"><h2 data-i18n="pCountries"></h2><div class="bars" id="p-countries"></div></div>
+    <div class="panel"><h2 data-i18n="pBands"></h2><div class="bars" id="p-bands"></div></div>
+    <div class="panel"><h2 data-i18n="pFreqs"></h2><div class="bars" id="p-freqs"></div></div>
+  </div>
+  <div class="grid">
+    <div class="panel"><h2 data-i18n="pHours"></h2><div class="cols" id="p-hours"></div>
+      <div class="axis"><span>0</span><span>6</span><span>12</span><span>18</span><span>23</span></div></div>
+    <div class="panel"><h2 id="p-days-title"></h2><div class="cols" id="p-days"></div>
+      <div class="axis" id="p-days-axis"></div></div>
+    <div class="panel"><h2 data-i18n="pASN"></h2><div class="bars" id="p-asn"></div></div>
+  </div>
+
+  <div class="panel">
+    <div class="table-head"><h2 data-i18n="tSessions"></h2><input type="search" id="filter" data-i18n-placeholder="tFilter"></div>
+    <div class="tbl"><table>
+      <thead><tr><th data-i18n="thStart"></th><th data-i18n="thDur"></th><th>IP</th><th data-i18n="thPlace"></th>
+        <th data-i18n="thNet"></th><th data-i18n="thFreqs"></th><th></th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table></div>
+    <div class="foot"><span id="foot"></span> <button id="more" class="more" hidden data-i18n="more"></button></div>
+    <div class="foot"><span data-i18n="geoSrc"></span> <a href="https://db-ip.com" target="_blank" rel="noopener">IP Geolocation by DB-IP</a> (CC BY 4.0) · <span data-i18n="mapSrc"></span> © OpenStreetMap</div>
+  </div>
+</div>
+
+<script>
+"use strict";
+// UI strings. Functions take parameters; everything else is plain text.
+const I18N = {
+  cs: {
+    title: "SpyServer – posluchači", r24h: "24 h", r7d: "7 dní", r30d: "30 dní", rAll: "Vše",
+    kSessions: "relací", kIPs: "unikátních IP", kCountries: "zemí", kTotal: "celkem poslechu", kAvg: "průměrná relace",
+    pCountries: "Země", pBands: "Pásma (podle času poslechu)", pFreqs: "Nejposlouchanější kmitočty (MHz)",
+    pHours: "Aktivita podle hodiny dne", pDays: "Relace po dnech", pHoursTL: "Relace po hodinách", pASN: "Sítě (ASN)",
+    tSessions: "Relace", tFilter: "Filtr: IP, město, země, síť, MHz, pásmo…",
+    thStart: "Začátek", thDur: "Délka", thPlace: "Místo", thNet: "Síť", thFreqs: "Kmitočty (MHz, posledních 6)",
+    more: "Zobrazit dalších 50", geoSrc: "Geolokace:", mapSrc: "mapa",
+    loading: "načítám…", noData: "Zatím žádná data", noSessions: "Žádné relace", noReport: "Zatím žádný report",
+    lastReport: (ago) => `poslední report před ${ago}`, listening: "Právě poslouchá", listeningNow: "● právě poslouchá",
+    unknownPlace: "neznámé místo", unknownCountry: "Neznámá", unknownNet: "Neznámá síť",
+    nSessions: (n) => `${n} relací`, station: "Stanice", lastSeen: "naposledy",
+    ago24h: "před 24 h", now: "teď", tuningHistory: "Průběh ladění",
+    tlTime: "Čas", tlFreq: "Kmitočet", tlDur: "Doba", tlBand: "Pásmo",
+    initialFreq: "výchozí kmitočet serveru (nezapočítáno)", tlError: "Nepodařilo se načíst průběh ladění.",
+    dcTitle: "Hostingová / cloudová síť", manyTitle: (n) => `${n} relací z této IP v období`,
+    foot: (shown, total, iv) => `Zobrazeno ${shown} z ${total} relací. Kmitočty jsou středové kmitočty přijímače na celé MHz (ne VFO posluchače), z reportů každých ${iv} s; délky jsou přibližné.`,
+    unavailable: (e) => `Dashboard nedostupný (${e})`,
+  },
+  en: {
+    title: "SpyServer – listeners", r24h: "24 h", r7d: "7 days", r30d: "30 days", rAll: "All",
+    kSessions: "sessions", kIPs: "unique IPs", kCountries: "countries", kTotal: "total listening", kAvg: "average session",
+    pCountries: "Countries", pBands: "Bands (by listening time)", pFreqs: "Most listened frequencies (MHz)",
+    pHours: "Activity by hour of day", pDays: "Sessions per day", pHoursTL: "Sessions per hour", pASN: "Networks (ASN)",
+    tSessions: "Sessions", tFilter: "Filter: IP, city, country, network, MHz, band…",
+    thStart: "Start", thDur: "Duration", thPlace: "Location", thNet: "Network", thFreqs: "Frequencies (MHz, last 6)",
+    more: "Show 50 more", geoSrc: "Geolocation:", mapSrc: "map",
+    loading: "loading…", noData: "No data yet", noSessions: "No sessions", noReport: "No report yet",
+    lastReport: (ago) => `last report ${ago} ago`, listening: "Listening now", listeningNow: "● listening now",
+    unknownPlace: "unknown location", unknownCountry: "Unknown", unknownNet: "Unknown network",
+    nSessions: (n) => `${n} sessions`, station: "Station", lastSeen: "last seen",
+    ago24h: "24 h ago", now: "now", tuningHistory: "Tuning history",
+    tlTime: "Time", tlFreq: "Frequency", tlDur: "Duration", tlBand: "Band",
+    initialFreq: "server's initial frequency (not counted)", tlError: "Could not load the tuning history.",
+    dcTitle: "Hosting / cloud network", manyTitle: (n) => `${n} sessions from this IP in the period`,
+    foot: (shown, total, iv) => `Showing ${shown} of ${total} sessions. Frequencies are the receiver's center frequencies in whole MHz (not the listener's VFO), from reports every ${iv} s; durations are approximate.`,
+    unavailable: (e) => `Dashboard unavailable (${e})`,
+  },
+};
+const LOCALES = { cs: "cs-CZ", en: "en-GB" };
+
+// Org name fragments that indicate hosting / cloud networks (likely bots).
+const DATACENTER = ["google", "amazon", "aws", "microsoft", "azure", "ovh", "hetzner", "digitalocean",
+  "linode", "akamai", "vultr", "choopa", "oracle", "alibaba", "tencent", "contabo", "scaleway",
+  "leaseweb", "m247", "datacamp", "cloudflare", "hostinger", "ionos", "netcup", "colocrossing"];
+const MANY_SESSIONS = 10; // sessions per IP in the selected range considered suspicious
+const PAGE = 50;
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Reports carry the receiver's center frequency, so whole MHz is the honest precision.
+const mhz = (hz) => Math.floor(hz / 1e6) + " MHz";
+const flag = (cc) => cc && cc.length === 2 ? String.fromCodePoint(...[...cc.toUpperCase()].map((c) => 0x1f1a5 + c.charCodeAt(0))) : "";
+const isDC = (org) => !!org && DATACENTER.some((k) => org.toLowerCase().includes(k));
+const tzSec = () => -new Date().getTimezoneOffset() * 60;
+
+// Language: saved choice, otherwise the browser language (Czech/Slovak -> cs).
+let lang = (navigator.language || "").toLowerCase().match(/^(cs|sk)/) ? "cs" : "en";
+try { const l = localStorage.getItem("ssmon-lang"); if (I18N[l]) lang = l; } catch (e) {}
+const t = (key, ...args) => { const v = I18N[lang][key] ?? I18N.cs[key]; return typeof v === "function" ? v(...args) : v; };
+let nf = new Intl.NumberFormat(LOCALES[lang]);
+
+function applyStaticText() {
+  document.documentElement.lang = lang;
+  document.title = t("title");
+  document.querySelectorAll("[data-i18n]").forEach((el) => (el.textContent = t(el.dataset.i18n)));
+  document.querySelectorAll("[data-i18n-placeholder]").forEach((el) => (el.placeholder = t(el.dataset.i18nPlaceholder)));
+  document.querySelectorAll("#lang button").forEach((b) => b.classList.toggle("active", b.dataset.lang === lang));
+}
+
+function dur(sec) {
+  sec = Math.max(0, Math.round(sec));
+  if (sec < 60) return sec + " s";
+  const m = Math.round(sec / 60);
+  if (m < 60) return m + " min";
+  const h = Math.floor(m / 60), r = m % 60;
+  if (h < 48) return h + " h " + String(r).padStart(2, "0") + " min";
+  return Math.floor(h / 24) + " d " + (h % 24) + " h";
+}
+const fmtTime = (ts) => new Date(ts * 1000).toLocaleString(LOCALES[lang], { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" });
+const ago = (ts, now) => { const s = now - ts; return s < 90 ? Math.round(s) + " s" : dur(s); };
+
+let days = 7, data = null, map = null, layer = null, fitted = false, markersByKey = {};
+let tableRows = [], tableTotal = 0, tableQuery = "", tableSeq = 0;
+try { const d = localStorage.getItem("ssmon-days"); if (d !== null) days = +d; } catch (e) {}
+
+function initMap() {
+  map = L.map("map", { worldCopyJump: true }).setView([30, 10], 2);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  }).addTo(map);
+  layer = L.layerGroup().addTo(map);
+}
+
+function barList(el, items, fmt) {
+  if (!items.length) { el.innerHTML = `<div class="empty">${t("noData")}</div>`; return; }
+  const top = Math.max(...items.map((i) => i.value)) || 1;
+  el.innerHTML = items.map((i) => `<div class="bar">
+      <span class="name">${i.label}</span><span class="val">${fmt(i.row)}</span>
+      <span class="track"><span class="fill" style="width:${(i.value / top * 100).toFixed(1)}%"></span></span></div>`).join("");
+}
+
+function columns(el, values, titles) {
+  const top = Math.max(...values, 1);
+  el.innerHTML = values.map((v, i) => `<div class="c" style="height:${(v / top * 100).toFixed(1)}%" title="${esc(titles[i])}"></div>`).join("");
+}
+
+function render() {
+  const now = data.now, F = data.fields || {}, S = data.summary;
+
+  $("station-desc").textContent = [F.DeviceType, F.AntennaType, F.ServerVersion && "v" + F.ServerVersion].filter(Boolean).join(" · ") || " ";
+  $("srv-dot").className = "dot " + (data.online ? "on" : "off");
+  $("srv-text").textContent = data.last_report
+    ? (data.online ? "Online" : "Offline") + " · " + t("lastReport", ago(data.last_report, now))
+      + (F.CurrentCenterFrequency ? " · " + mhz(+F.CurrentCenterFrequency) : "")
+    : t("noReport");
+
+  const live = S.live, liveEl = $("live");
+  if (live && data.online) {
+    const cur = +F.CurrentCenterFrequency;
+    liveEl.innerHTML = `<span class="dot on"></span><b>${t("listening")}</b>
+      <span>${flag(live.cc)} ${esc([live.city, live.country].filter(Boolean).join(", ") || t("unknownPlace"))}</span>
+      <span class="mono">${esc(live.ip)}</span><span class="muted">${esc(live.org || "")}</span>
+      <span class="freq">${cur ? mhz(cur) : ""}</span><span class="muted">${dur(live.secs)}</span>`;
+    liveEl.classList.add("show");
+  } else liveEl.classList.remove("show");
+
+  const T = S.totals;
+  $("k-sessions").textContent = nf.format(T.sessions);
+  $("k-ips").textContent = nf.format(T.ips);
+  $("k-countries").textContent = nf.format(T.countries);
+  $("k-total").textContent = T.sessions ? dur(T.secs) : "–";
+  $("k-avg").textContent = T.sessions ? dur(T.secs / T.sessions) : "–";
+
+  barList($("p-countries"), S.countries.map((c) => ({ label: `${flag(c.cc)} ${esc(c.country || t("unknownCountry"))}`, value: c.sessions, row: c })),
+    (c) => `${c.sessions}× · ${c.ips} IP · ${dur(c.secs)}`);
+  barList($("p-bands"), S.bands.map((b) => ({ label: esc(b.band), value: b.secs, row: b })), (b) => dur(b.secs));
+  barList($("p-freqs"), S.freqs.map((f) => ({
+    label: `<span class="mono">${f.mhz} MHz</span> <span class="muted">${esc(f.band)}</span>`, value: f.secs, row: f,
+  })), (f) => `${dur(f.secs)} · ${f.sessions}×`);
+  barList($("p-asn"), S.asns.map((a) => ({
+    label: `${isDC(a.org) ? '<span class="tag dc">DC</span>' : ""}${esc(a.org || t("unknownNet"))} <span class="muted">${a.asn ? "AS" + a.asn : ""}</span>`,
+    value: a.sessions, row: a,
+  })), (a) => `${a.sessions}× · ${a.ips} IP`);
+
+  columns($("p-hours"), S.hours, S.hours.map((v, h) => `${h}:00–${h}:59 · ${t("nSessions", v)}`));
+
+  // Timeline: fill empty buckets between the range start and now.
+  const counts = Object.fromEntries(S.timeline.map((b) => [b.k, b.n]));
+  let keys = [], label, titleOf;
+  if (S.unit === "hour") {
+    const last = Math.floor(now / 3600);
+    for (let k = last - 23; k <= last; k++) keys.push(k);
+    titleOf = (k) => `${new Date(k * 3600000).getHours()}:00`;
+    label = [t("ago24h"), t("now")];
+    $("p-days-title").textContent = t("pHoursTL");
+  } else {
+    const last = Math.floor((now + tzSec()) / 86400);
+    const first = days > 0 ? last - days + 1 : (S.timeline.length ? S.timeline[0].k : last);
+    for (let k = first; k <= last; k++) keys.push(k);
+    const dl = (k) => new Date((k * 86400 - tzSec()) * 1000 + 43200000).toLocaleDateString(LOCALES[lang], { day: "numeric", month: "numeric", year: keys.length > 366 ? "2-digit" : undefined });
+    titleOf = dl;
+    label = keys.length ? [dl(keys[0]), dl(keys[keys.length - 1])] : [];
+    $("p-days-title").textContent = t("pDays");
+  }
+  const vals = keys.map((k) => counts[k] || 0);
+  columns($("p-days"), vals, keys.map((k, i) => `${titleOf(k)} · ${t("nSessions", vals[i])}`));
+  $("p-days-axis").innerHTML = label.map((l) => `<span>${esc(l)}</span>`).join("");
+
+  renderMap(S);
+}
+
+function renderMap(S) {
+  layer.clearLayers();
+  markersByKey = {};
+  const css = getComputedStyle(document.documentElement);
+  const accent = css.getPropertyValue("--accent").trim(), liveC = css.getPropertyValue("--live").trim();
+  const pts = [];
+
+  if (data.station) {
+    L.circleMarker(data.station, { radius: 7, color: "#fff", weight: 2, fillColor: "#d9480f", fillOpacity: 1 })
+      .bindPopup(`<b>${t("station")}</b><br>${esc(data.fields.AntennaType || "")}<br>${esc(data.fields.DeviceType || "")}`).addTo(layer);
+    pts.push(data.station);
+  }
+  S.locations.forEach((l) => {
+    const isLive = l.open && data.online;
+    if (data.station) L.polyline([data.station, [l.lat, l.lon]], { color: isLive ? liveC : accent, weight: isLive ? 2 : 1, opacity: isLive ? .8 : .25, interactive: false }).addTo(layer);
+    const m = L.circleMarker([l.lat, l.lon], {
+      radius: Math.min(22, 5 + 3 * Math.sqrt(l.sessions)), color: isLive ? liveC : accent, weight: isLive ? 3 : 1.5,
+      fillColor: isLive ? liveC : accent, fillOpacity: isLive ? .6 : .35,
+    }).bindPopup(`<b>${flag(l.cc)} ${esc([l.city, l.country].filter(Boolean).join(", ") || t("unknownPlace"))}</b><br>
+      ${t("nSessions", l.sessions)} · ${l.ips} IP · ${dur(l.secs)}<br>
+      <span style="opacity:.7">${esc(l.org)}</span><br>
+      ${t("lastSeen")} ${fmtTime(l.last)}${isLive ? `<br><b>${t("listeningNow")}</b>` : ""}`);
+    m.addTo(layer);
+    markersByKey[l.lat.toFixed(3) + "," + l.lon.toFixed(3)] = m;
+    pts.push([l.lat, l.lon]);
+  });
+  if (!fitted && pts.length > 1) { map.fitBounds(pts, { padding: [30, 30], maxZoom: 6 }); fitted = true; }
+  else if (!fitted && pts.length === 1) { map.setView(pts[0], 5); fitted = true; }
+}
+
+// Nearest map marker for a session (locations are averaged per ~100 m cell).
+function markerFor(s) {
+  if (s.lat == null) return null;
+  let best = null, bd = Infinity;
+  for (const m of Object.values(markersByKey)) {
+    const p = m.getLatLng(), d = Math.abs(p.lat - s.lat) + Math.abs(p.lng - s.lon);
+    if (d < bd) { bd = d; best = m; }
+  }
+  return bd < 0.01 ? best : null;
+}
+
+async function loadTable(append) {
+  const seq = ++tableSeq;
+  const offset = append ? tableRows.length : 0;
+  const r = await fetch(`api/sessions?days=${days}&limit=${PAGE}&offset=${offset}&lang=${lang}&q=${encodeURIComponent(tableQuery)}`, { cache: "no-store" });
+  if (!r.ok || seq !== tableSeq) return;
+  const d = await r.json();
+  tableRows = append ? tableRows.concat(d.sessions) : d.sessions;
+  tableTotal = d.total;
+  renderTable();
+}
+
+const LAST_FREQS = 6; // MHz values shown inline per session (most recent ones)
+const expanded = new Set();
+
+function renderTable() {
+  $("rows").innerHTML = tableRows.map((s, idx) => {
+    const shown = s.freqs.slice(-LAST_FREQS);
+    const extra = s.freqs.length - shown.length;
+    const chips = (extra > 0 ? `<span class="muted">+${extra} </span>` : "") +
+      shown.map((f) => `<span class="chip" title="${esc(f.band)} · ${dur(f.secs)}">${f.mhz}</span>`).join("");
+    const more = s.tunings > 1
+      ? `<button class="expand" data-id="${s.id}" title="${t("tuningHistory")}">${expanded.has(s.id) ? "▾" : "▸"} ${s.tunings}×</button>` : "";
+    const tags = (s.open && data && data.online ? '<span class="tag live">LIVE</span>' : "") +
+      (isDC(s.org) ? `<span class="tag dc" title="${t("dcTitle")}">DC</span>` : "") +
+      (s.ip_sessions >= MANY_SESSIONS ? `<span class="tag many" title="${t("manyTitle", s.ip_sessions)}">${s.ip_sessions}×</span>` : "");
+    return `<tr class="${s.lat != null ? "clickable" : ""}" data-idx="${idx}">
+      <td class="mono">${fmtTime(s.start)}</td><td>${dur(s.secs)}</td><td class="mono">${esc(s.ip)}</td>
+      <td>${flag(s.cc)} ${esc([s.city, s.cc].filter(Boolean).join(", ") || "–")}</td>
+      <td class="muted">${esc(s.org || "–")}${s.asn ? ' <span class="mono">AS' + s.asn + "</span>" : ""}</td>
+      <td>${chips || '<span class="muted">–</span>'} ${more}</td><td>${tags}</td></tr>` +
+      (expanded.has(s.id) ? `<tr class="detail"><td colspan="7"><div class="tl" id="tl-${s.id}"><span class="muted">${t("loading")}</span></div></td></tr>` : "");
+  }).join("") || `<tr><td colspan="7" class="empty">${t("noSessions")}</td></tr>`;
+  expanded.forEach((id) => loadTimeline(id));
+  $("more").hidden = tableRows.length >= tableTotal;
+  $("foot").textContent = t("foot", nf.format(tableRows.length), nf.format(tableTotal), data ? data.interval : 15);
+}
+
+async function loadTimeline(id) {
+  const el = $("tl-" + id);
+  if (!el) return;
+  try {
+    const r = await fetch(`api/session/timeline?id=${id}&lang=${lang}`, { cache: "no-store" });
+    const d = await r.json();
+    el.innerHTML = `<span class="h">${t("tlTime")}</span><span class="h">${t("tlFreq")}</span><span class="h">${t("tlDur")}</span><span class="h">${t("tlBand")}</span>` +
+      d.tunings.map((x) => `<span class="mono">${fmtTime(x.ts)}</span><span class="mono">${x.mhz} MHz</span><span>${dur(x.secs)}</span>` +
+        `<span class="muted">${x.initial ? t("initialFreq") : esc(x.band)}</span>`).join("");
+  } catch (e) { el.textContent = t("tlError"); }
+}
+
+$("rows").addEventListener("click", (e) => {
+  const btn = e.target.closest("button.expand");
+  if (btn) {
+    const id = +btn.dataset.id;
+    expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+    renderTable();
+    return;
+  }
+  const tr = e.target.closest("tr[data-idx]");
+  if (!tr) return;
+  const m = markerFor(tableRows[+tr.dataset.idx]);
+  if (m) { map.setView(m.getLatLng(), Math.max(map.getZoom(), 6)); m.openPopup(); window.scrollTo({ top: $("map").offsetTop - 20, behavior: "smooth" }); }
+});
+$("more").addEventListener("click", () => loadTable(true));
+let filterTimer = 0;
+$("filter").addEventListener("input", () => {
+  clearTimeout(filterTimer);
+  filterTimer = setTimeout(() => { tableQuery = $("filter").value.trim(); loadTable(false); }, 250);
+});
+
+document.querySelectorAll("#range button").forEach((b) => {
+  b.classList.toggle("active", +b.dataset.days === days);
+  b.addEventListener("click", () => {
+    days = +b.dataset.days;
+    try { localStorage.setItem("ssmon-days", String(days)); } catch (e) {}
+    document.querySelectorAll("#range button").forEach((x) => x.classList.toggle("active", x === b));
+    load(true);
+  });
+});
+
+document.querySelectorAll("#lang button").forEach((b) => b.addEventListener("click", () => {
+  if (b.dataset.lang === lang) return;
+  lang = b.dataset.lang;
+  nf = new Intl.NumberFormat(LOCALES[lang]);
+  try { localStorage.setItem("ssmon-lang", lang); } catch (e) {}
+  applyStaticText();
+  load(true); // band names come from the server in the selected language
+}));
+
+async function load(resetTable) {
+  try {
+    const r = await fetch(`api/summary?days=${days}&tz=${tzSec()}&lang=${lang}`, { cache: "no-store" });
+    if (!r.ok) throw new Error(r.status);
+    data = await r.json();
+    render();
+    // Refresh the table only while the user is looking at its first page.
+    if (resetTable || tableRows.length <= PAGE) await loadTable(false);
+  } catch (e) {
+    $("srv-dot").className = "dot off";
+    $("srv-text").textContent = t("unavailable", e.message);
+  }
+}
+
+applyStaticText();
+$("srv-text").textContent = t("loading");
+initMap();
+load(true);
+setInterval(() => load(false), 15000);
+</script>
+</body>
+</html>
