@@ -65,6 +65,30 @@ AntennaLocation=50.0755, 14.4378
 ssmon tyto pakety zachytí přes `AF_PACKET` socket na zvoleném rozhraní (typicky WireGuard tunel
 mezi VPS a RPi) a skládá z nich **relace**.
 
+### Provoz přímo na stroji se SpyServerem (bez tunelu)
+
+WireGuard ani VPS nejsou podmínkou. ssmon potřebuje jen vidět reporty SpyServeru do adresáře
+(`POST /register` na TCP port 8080) na rozhraní, které sleduje. Pokud má SpyServer veřejnou IP a ssmon
+běží na stejném stroji, stačí v `-iface` uvést síťové rozhraní stroje. Zachytávají se i odchozí
+pakety.
+
+```sh
+ip -br link                                   # find the interface, e.g. eth0, enp1s0, end0
+sudo tcpdump -i eth0 -nn 'tcp port 8080'      # a POST /register must appear within ~15 s
+```
+
+Co změnit:
+- `-iface eth0` (název tvého rozhraní) místo `-iface wg0`, a to při ručním spuštění i v `ssmon.service`.
+- V `ssmon.service` lze z `After=` odstranit `wg-quick@wg0.service` (když tam zůstane, nevadí to).
+- Sestavit pro architekturu stroje (`uname -m`): `x86_64` → `GOARCH=amd64`, `aarch64` → `GOARCH=arm64`,
+  32bitový Raspberry Pi OS (`armv7l`) → `GOARCH=arm GOARM=7`.
+
+Poznámky:
+- Zachytává se jen IPv4. Pokud by reporty odcházely přes IPv6, ssmon je neuvidí (ověříš to `tcpdump`
+  výše).
+- `-iface any` není podporované, je potřeba konkrétní rozhraní. Běží-li SpyServer v network namespace
+  nebo v kontejneru, použij rozhraní uvnitř něj (nebo jeho veth protějšek na hostiteli).
+
 ### Ukládají se jen změny, ne každý report
 
 | událost v reportu | zápis do databáze |
