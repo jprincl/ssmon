@@ -1,0 +1,28 @@
+# Band plan for the ssmon dashboard (use with -bands /path/to/bands.txt).
+# One band per line: name; low MHz; high MHz[; English name]
+# The first match wins, so put narrower bands above wider ones.
+# The English name is optional; without it the first name is used in both languages.
+# Note: SpyServer reports the receiver's CENTER frequency, not the client's
+# VFO, so the band is only as exact as the displayed bandwidth allows.
+CB 27 MHz;            26.965; 27.405; CB 27 MHz
+10 m;                 28;     29.7;   10 m
+6 m;                  50;     54;     6 m
+4 m;                  70;     70.5;   4 m
+FM rozhlas;           87.5;   108;    FM broadcast
+Letecké (navigace);   108;    118;    Airband (navigation)
+Letecké (hlas);       118;    137;    Airband (voice)
+Meteo družice;        137;    138;    Weather satellites
+2 m;                  144;    146;    2 m
+Námořní VHF;          156;    162.05; Marine VHF
+DAB;                  174;    240;    DAB
+Vojenské letecké UHF; 225;    400;    Military airband UHF
+Radiosondy;           400;    406;    Radiosondes
+ISM 433;              433.05; 434.79; ISM 433
+70 cm;                430;    440;    70 cm
+PMR446;               446;    446.2;  PMR446
+LTE 800;              791;    862;    LTE 800
+ISM 868;              863;    870;    ISM 868
+GSM-R;                918;    925;    GSM-R
+GSM 900 (downlink);   925;    960;    GSM 900 (downlink)
+ADS-B 1090;           1089;   1091;   ADS-B 1090
+23 cm;                1240;   1300;   23 cm

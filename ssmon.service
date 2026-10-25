@@ -1,0 +1,37 @@
+[Unit]
+Description=SpyServer listener monitor (passive directory report sniffer + dashboard)
+After=network-online.target wg-quick@wg0.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/ssmon \
+    -iface wg0 \
+    -db /var/lib/ssmon/ssmon.db \
+    -listen :8090 \
+    -initial-mhz 145 \
+    -bands /opt/ssmon/bands.txt \
+    -geoip-city /opt/ssmon/geoip/dbip-city-lite.mmdb \
+    -geoip-asn /opt/ssmon/geoip/dbip-asn-lite.mmdb
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+
+# Runs as an unprivileged throwaway user; only raw packet capture is allowed.
+DynamicUser=yes
+StateDirectory=ssmon
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_PACKET AF_NETLINK AF_INET AF_INET6 AF_UNIX
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target
