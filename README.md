@@ -69,6 +69,31 @@ AntennaLocation=50.0755, 14.4378
 ssmon captures these packets through an `AF_PACKET` socket on the chosen interface (typically the
 WireGuard tunnel between the VPS and the RPi) and builds **sessions** from them.
 
+### Running directly on the SpyServer host (no tunnel)
+
+The WireGuard/VPS setup is not required. ssmon only needs to see SpyServer's reports to the directory
+(`POST /register` to TCP port 8080) on the interface it watches. If SpyServer has a public IP and ssmon
+runs on the same machine, point `-iface` at the machine's network interface. Outgoing packets are
+captured too.
+
+```sh
+ip -br link                                   # find the interface, e.g. eth0, enp1s0, end0
+sudo tcpdump -i eth0 -nn 'tcp port 8080'      # a POST /register must appear within ~15 s
+```
+
+What to change:
+- `-iface eth0` (your interface name) instead of `-iface wg0`, both in a manual run and in
+  `ssmon.service`.
+- In `ssmon.service`, `wg-quick@wg0.service` can be removed from `After=` (it is harmless if left in).
+- Build for the host's architecture (`uname -m`): `x86_64` → `GOARCH=amd64`, `aarch64` → `GOARCH=arm64`,
+  32-bit Raspberry Pi OS (`armv7l`) → `GOARCH=arm GOARM=7`.
+
+Notes:
+- Only IPv4 is captured. If the reports leave the host over IPv6, ssmon will not see them (check with
+  `tcpdump` as above).
+- `-iface any` is not supported; use a specific interface. If SpyServer runs in a network namespace
+  or a container, use the interface inside it (or its veth peer on the host).
+
 ### Only changes are stored, not every report
 
 | event in the report | database write |
