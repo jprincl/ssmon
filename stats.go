@@ -133,7 +133,7 @@ func (m *Monitor) Summary(since, iv float64, tzSec int64, hourly bool, lang stri
 	}
 
 	rows, err := qry(db, `SELECT coalesce(cc, ''), coalesce(max(country), ''), count(*), count(DISTINCT ip), sum(`+durExpr+`)
-	  FROM sessions s WHERE s.last_seen >= :since GROUP BY cc ORDER BY 3 DESC LIMIT 15`, args...)
+	  FROM sessions s WHERE s.last_seen >= :since GROUP BY cc ORDER BY 3 DESC LIMIT 300`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +145,7 @@ func (m *Monitor) Summary(since, iv float64, tzSec int64, hourly bool, lang stri
 	rows.Close()
 
 	rows, err = qry(db, `SELECT coalesce(asn, 0), coalesce(max(org), ''), count(*), count(DISTINCT ip)
-	  FROM sessions s WHERE s.last_seen >= :since GROUP BY asn ORDER BY 3 DESC LIMIT 10`, args...)
+	  FROM sessions s WHERE s.last_seen >= :since GROUP BY asn ORDER BY 3 DESC LIMIT 300`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -206,8 +206,8 @@ func (m *Monitor) Summary(since, iv float64, tzSec int64, hourly bool, lang stri
 		sum.Freqs = append(sum.Freqs, freqRow{MHz: k, Band: a.band, Secs: a.secs, Sessions: len(a.sessions)})
 	}
 	sort.Slice(sum.Freqs, func(i, j int) bool { return sum.Freqs[i].Secs > sum.Freqs[j].Secs })
-	if len(sum.Freqs) > 10 {
-		sum.Freqs = sum.Freqs[:10]
+	if len(sum.Freqs) > 300 {
+		sum.Freqs = sum.Freqs[:300]
 	}
 	for b, secs := range byBand {
 		sum.Bands = append(sum.Bands, bandRow{b, secs})
@@ -256,8 +256,10 @@ func (m *Monitor) Summary(since, iv float64, tzSec int64, hourly bool, lang stri
 }
 
 // Sessions returns one page of sessions matching the free-text filter q
-// (IP, place, network, "AS123", MHz prefix like "145.5" or a band name).
-func (m *Monitor) Sessions(since, iv float64, q string, limit, offset int, lang string) ([]SessionRow, int, error) {
+// (IP, place, network, "AS123", MHz like "145" or a band name). Closed
+// sessions not longer than minSecs are left out (0 = show all); hidden is
+// how many matching sessions that filter removed.
+func (m *Monitor) Sessions(since, iv float64, q string, limit, offset int, lang string, minSecs float64) (list []SessionRow, total, hidden int, err error) {
 	where := `s.last_seen >= :since`
 	var args []any
 	if q = strings.TrimSpace(q); q != "" {
@@ -281,13 +283,23 @@ func (m *Monitor) Sessions(since, iv float64, q string, limit, offset int, lang 
 		where += ` AND (` + strings.Join(conds, " OR ") + `)`
 	}
 
-	var total int
-	cargs := append([]any{sql.Named("since", since)}, args...)
-	if err := qryRow(m.db, `SELECT count(*) FROM sessions s WHERE `+where, cargs...).Scan(&total); err != nil {
-		return nil, 0, err
+	if minSecs > 0 {
+		var all int
+		cargs := append([]any{sql.Named("since", since)}, args...)
+		if err = qryRow(m.db, `SELECT count(*) FROM sessions s WHERE `+where, cargs...).Scan(&all); err != nil {
+			return nil, 0, 0, err
+		}
+		// The open session is always shown, however short it is so far.
+		where += ` AND (s.open = 1 OR ` + durExpr + ` > :minsecs)`
+		args = append(args, sql.Named("minsecs", minSecs), sql.Named("iv", iv))
+		defer func() { hidden = all - total }()
 	}
-	list, err := m.querySessions(where, args, since, iv, limit, offset, lang)
-	return list, total, err
+	cargs := append([]any{sql.Named("since", since)}, args...)
+	if err = qryRow(m.db, `SELECT count(*) FROM sessions s WHERE `+where, cargs...).Scan(&total); err != nil {
+		return nil, 0, 0, err
+	}
+	list, err = m.querySessions(where, args, since, iv, limit, offset, lang)
+	return list, total, hidden, err
 }
 
 func (m *Monitor) querySessions(where string, args []any, since, iv float64, limit, offset int, lang string) ([]SessionRow, error) {
@@ -377,9 +389,13 @@ func qryRow(db *sql.DB, query string, args ...any) *sql.Row {
 
 func pick(query string, args []any) []any {
 	out := make([]any, 0, len(args))
+	seen := map[string]bool{}
 	for _, a := range args {
-		if na, ok := a.(sql.NamedArg); ok && !strings.Contains(query, ":"+na.Name) {
-			continue
+		if na, ok := a.(sql.NamedArg); ok {
+			if seen[na.Name] || !strings.Contains(query, ":"+na.Name) {
+				continue // unused, or already passed (first value wins)
+			}
+			seen[na.Name] = true
 		}
 		out = append(out, a)
 	}

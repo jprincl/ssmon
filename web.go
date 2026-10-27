@@ -81,7 +81,7 @@ func newWebHandler(m *Monitor, interval time.Duration) http.Handler {
 		})
 	})
 
-	// GET /api/sessions?days=7&q=praha&limit=50&offset=0
+	// GET /api/sessions?days=7&q=praha&limit=50&offset=0&minsecs=30
 	mux.HandleFunc("/api/sessions", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		_, since := sinceParam(q.Get("days"), ts(time.Now()))
@@ -93,12 +93,13 @@ func newWebHandler(m *Monitor, interval time.Duration) http.Handler {
 		if offset < 0 {
 			offset = 0
 		}
-		list, total, err := m.Sessions(since, iv, q.Get("q"), limit, offset, langParam(r))
+		minSecs, _ := strconv.ParseFloat(q.Get("minsecs"), 64)
+		list, total, hidden, err := m.Sessions(since, iv, q.Get("q"), limit, offset, langParam(r), minSecs)
 		if err != nil {
 			apiError(w, err)
 			return
 		}
-		writeJSON(w, map[string]any{"total": total, "sessions": list})
+		writeJSON(w, map[string]any{"total": total, "hidden": hidden, "sessions": list})
 	})
 	// GET /api/session/timeline?id=123
 	mux.HandleFunc("/api/session/timeline", func(w http.ResponseWriter, r *http.Request) {
