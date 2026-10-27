@@ -70,9 +70,9 @@
   .cols .c:hover { opacity: 1; outline: 2px solid var(--accent-soft); }
   .axis { display: flex; justify-content: space-between; color: var(--muted); font-size: 11.5px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 
-  .table-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .table-head { display: flex; align-items: center; gap: 12px 16px; margin-bottom: 10px; flex-wrap: wrap; }
   .table-head h2 { margin: 0; }
-  input[type=search] { flex: 0 1 260px; margin-left: auto; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
+  input[type=search] { flex: 0 1 260px; padding: 6px 10px; border-radius: 8px; border: 1px solid var(--line);
     background: var(--bg); color: var(--text); font: inherit; }
   .tbl { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -107,6 +107,10 @@
   .lang button.active { opacity: 1; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
   .lang svg { width: 24px; height: 16px; display: block; border-radius: 2px; }
   .foot a { color: inherit; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; user-select: none; }
+  .toggle input { accent-color: var(--accent); margin: 0; }
+  .bars-more { margin-top: 8px; border: 0; background: none; color: var(--accent); font: 600 12.5px system-ui, sans-serif; padding: 2px 0; cursor: pointer; }
+  .bars-more:hover { text-decoration: underline; }
 </style>
 </head>
 <body>
@@ -153,7 +157,9 @@
   </div>
 
   <div class="panel">
-    <div class="table-head"><h2 data-i18n="tSessions"></h2><input type="search" id="filter" data-i18n-placeholder="tFilter"></div>
+    <div class="table-head"><h2 data-i18n="tSessions"></h2><div class="spacer"></div>
+      <label class="toggle"><input type="checkbox" id="hide-short" checked><span data-i18n="hideShort"></span></label>
+      <input type="search" id="filter" data-i18n-placeholder="tFilter"></div>
     <div class="tbl"><table>
       <thead><tr><th data-i18n="thStart"></th><th data-i18n="thDur"></th><th>IP</th><th data-i18n="thPlace"></th>
         <th data-i18n="thNet"></th><th data-i18n="thFreqs"></th><th></th></tr></thead>
@@ -186,6 +192,8 @@ const I18N = {
     dcTitle: "Hostingová / cloudová síť", manyTitle: (n) => `${n} relací z této IP v období`,
     foot: (shown, total, iv) => `Zobrazeno ${shown} z ${total} relací. Kmitočty jsou středové kmitočty přijímače na celé MHz (ne VFO posluchače), z reportů každých ${iv} s; délky jsou přibližné.`,
     unavailable: (e) => `Dashboard nedostupný (${e})`,
+    hideShort: "Skrýt relace ≤ 30 s", hiddenShort: (n) => `${n} krátkých relací skryto`,
+    showAll: (n) => `Zobrazit vše (${n})`, showLess: "Zobrazit méně",
   },
   en: {
     title: "SpyServer – listeners", r24h: "24 h", r7d: "7 days", r30d: "30 days", rAll: "All",
@@ -205,6 +213,8 @@ const I18N = {
     dcTitle: "Hosting / cloud network", manyTitle: (n) => `${n} sessions from this IP in the period`,
     foot: (shown, total, iv) => `Showing ${shown} of ${total} sessions. Frequencies are the receiver's center frequencies in whole MHz (not the listener's VFO), from reports every ${iv} s; durations are approximate.`,
     unavailable: (e) => `Dashboard unavailable (${e})`,
+    hideShort: "Hide sessions ≤ 30 s", hiddenShort: (n) => `${n} short sessions hidden`,
+    showAll: (n) => `Show all (${n})`, showLess: "Show less",
   },
 };
 const LOCALES = { cs: "cs-CZ", en: "en-GB" };
@@ -215,6 +225,8 @@ const DATACENTER = ["google", "amazon", "aws", "microsoft", "azure", "ovh", "het
   "leaseweb", "m247", "datacamp", "cloudflare", "hostinger", "ionos", "netcup", "colocrossing"];
 const MANY_SESSIONS = 10; // sessions per IP in the selected range considered suspicious
 const PAGE = 50;
+const SHORT_SECS = 30;  // sessions up to this length are hidden from the table by default
+const TOP_N = 10;       // rows shown in the bar panels before "show all"
 
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
@@ -251,7 +263,10 @@ const fmtTime = (ts) => new Date(ts * 1000).toLocaleString(LOCALES[lang], { day:
 const ago = (ts, now) => { const s = now - ts; return s < 90 ? Math.round(s) + " s" : dur(s); };
 
 let days = 7, data = null, map = null, layer = null, fitted = false, markersByKey = {};
-let tableRows = [], tableTotal = 0, tableQuery = "", tableSeq = 0;
+let tableRows = [], tableTotal = 0, tableHidden = 0, tableQuery = "", tableSeq = 0;
+let hideShort = true;
+const openPanels = new Set(); // bar panels expanded with "show all"
+try { if (localStorage.getItem("ssmon-hide-short") === "0") hideShort = false; } catch (e) {}
 try { const d = localStorage.getItem("ssmon-days"); if (d !== null) days = +d; } catch (e) {}
 
 function initMap() {
@@ -262,13 +277,25 @@ function initMap() {
   layer = L.layerGroup().addTo(map);
 }
 
+// Bar list showing the top TOP_N items; the rest is revealed with a button.
 function barList(el, items, fmt) {
   if (!items.length) { el.innerHTML = `<div class="empty">${t("noData")}</div>`; return; }
   const top = Math.max(...items.map((i) => i.value)) || 1;
-  el.innerHTML = items.map((i) => `<div class="bar">
+  const open = openPanels.has(el.id);
+  const shown = open ? items : items.slice(0, TOP_N);
+  el.innerHTML = shown.map((i) => `<div class="bar">
       <span class="name">${i.label}</span><span class="val">${fmt(i.row)}</span>
-      <span class="track"><span class="fill" style="width:${(i.value / top * 100).toFixed(1)}%"></span></span></div>`).join("");
+      <span class="track"><span class="fill" style="width:${(i.value / top * 100).toFixed(1)}%"></span></span></div>`).join("") +
+    (items.length > TOP_N ? `<button class="bars-more" data-panel="${el.id}">${open ? t("showLess") : t("showAll", items.length)}</button>` : "");
 }
+
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button.bars-more");
+  if (!b) return;
+  const id = b.dataset.panel;
+  openPanels.has(id) ? openPanels.delete(id) : openPanels.add(id);
+  if (data) render();
+});
 
 function columns(el, values, titles) {
   const top = Math.max(...values, 1);
@@ -384,11 +411,13 @@ function markerFor(s) {
 async function loadTable(append) {
   const seq = ++tableSeq;
   const offset = append ? tableRows.length : 0;
-  const r = await fetch(`api/sessions?days=${days}&limit=${PAGE}&offset=${offset}&lang=${lang}&q=${encodeURIComponent(tableQuery)}`, { cache: "no-store" });
+  const minsecs = hideShort ? SHORT_SECS : 0;
+  const r = await fetch(`api/sessions?days=${days}&limit=${PAGE}&offset=${offset}&lang=${lang}&minsecs=${minsecs}&q=${encodeURIComponent(tableQuery)}`, { cache: "no-store" });
   if (!r.ok || seq !== tableSeq) return;
   const d = await r.json();
   tableRows = append ? tableRows.concat(d.sessions) : d.sessions;
   tableTotal = d.total;
+  tableHidden = d.hidden || 0;
   renderTable();
 }
 
@@ -415,7 +444,8 @@ function renderTable() {
   }).join("") || `<tr><td colspan="7" class="empty">${t("noSessions")}</td></tr>`;
   expanded.forEach((id) => loadTimeline(id));
   $("more").hidden = tableRows.length >= tableTotal;
-  $("foot").textContent = t("foot", nf.format(tableRows.length), nf.format(tableTotal), data ? data.interval : 15);
+  $("foot").textContent = t("foot", nf.format(tableRows.length), nf.format(tableTotal), data ? data.interval : 15) +
+    (tableHidden > 0 ? " · " + t("hiddenShort", nf.format(tableHidden)) : "");
 }
 
 async function loadTimeline(id) {
@@ -444,6 +474,12 @@ $("rows").addEventListener("click", (e) => {
   if (m) { map.setView(m.getLatLng(), Math.max(map.getZoom(), 6)); m.openPopup(); window.scrollTo({ top: $("map").offsetTop - 20, behavior: "smooth" }); }
 });
 $("more").addEventListener("click", () => loadTable(true));
+$("hide-short").checked = hideShort;
+$("hide-short").addEventListener("change", (e) => {
+  hideShort = e.target.checked;
+  try { localStorage.setItem("ssmon-hide-short", hideShort ? "1" : "0"); } catch (err) {}
+  loadTable(false);
+});
 let filterTimer = 0;
 $("filter").addEventListener("input", () => {
   clearTimeout(filterTimer);
