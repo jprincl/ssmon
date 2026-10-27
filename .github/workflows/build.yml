@@ -1,1 +1,71 @@
+# Manual build of ssmon binaries for Linux (amd64, arm64, armv7).
+# Run it from the Actions tab -> "Build" -> "Run workflow".
+# Leave "release" empty to get downloadable artifacts only; enter a tag
+# (e.g. v1.0.0) to also publish a GitHub release with the archives.
+name: Build
 
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "Release tag to publish (e.g. v1.0.0). Leave empty for artifacts only."
+        required: false
+        default: ""
+
+permissions:
+  contents: write   # needed only to create the release
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { goarch: amd64, goarm: "",  name: linux-amd64 }
+          - { goarch: arm64, goarm: "",  name: linux-arm64 }
+          - { goarch: arm,   goarm: "7", name: linux-armv7 }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
+        run: |
+          go vet ./...
+          go build -trimpath -ldflags="-s -w" -o ssmon .
+          pkg="ssmon-${{ matrix.name }}"
+          mkdir -p "dist/$pkg"
+          cp ssmon bands.txt ssmon.service update-geoip.sh README*.md "dist/$pkg/"
+          # tar keeps the executable bit (a plain artifact zip would not)
+          tar -czf "dist/$pkg.tar.gz" -C dist "$pkg"
+          ls -l "dist/$pkg.tar.gz"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ssmon-${{ matrix.name }}
+          path: dist/ssmon-${{ matrix.name }}.tar.gz
+          retention-days: 30
+
+  release:
+    needs: build
+    if: ${{ inputs.release != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.release }}
+          name: ssmon ${{ inputs.release }}
+          files: dist/*.tar.gz
+          generate_release_notes: true
