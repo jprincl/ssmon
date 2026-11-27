@@ -11,17 +11,19 @@ ExecStart=/usr/local/bin/ssmon \
     -listen :8090 \
     -initial-mhz 145 \
     -bands /opt/ssmon/bands.txt \
+    -config /etc/ssmon/ssmon.conf \
     -geoip-city /opt/ssmon/geoip/dbip-city-lite.mmdb \
     -geoip-asn /opt/ssmon/geoip/dbip-asn-lite.mmdb
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=always
 RestartSec=5
 
-# Runs as an unprivileged throwaway user; only raw packet capture is allowed.
+# Runs as an unprivileged throwaway user. CAP_NET_RAW = packet capture,
+# CAP_NET_ADMIN = managing the ban set in its own nftables table (guard).
 DynamicUser=yes
 StateDirectory=ssmon
-AmbientCapabilities=CAP_NET_RAW
-CapabilityBoundingSet=CAP_NET_RAW
+AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes

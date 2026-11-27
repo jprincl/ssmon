@@ -27,8 +27,9 @@ var publicFields = []string{
 	"MinimumFrequency", "MaximumFrequency", "MaximumStreamedBandwidth",
 }
 
-func newWebHandler(m *Monitor, interval time.Duration) http.Handler {
+func newWebHandler(m *Monitor, guard *Guard, interval time.Duration) http.Handler {
 	mux := http.NewServeMux()
+	newAdminAuth(guard).register(mux)
 	iv := interval.Seconds()
 
 	leaflet, _ := fs.Sub(leafletFS, "web")

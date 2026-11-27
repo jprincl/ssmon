@@ -1,10 +1,13 @@
 package main
 
-// Passive capture of SpyServer directory reports.
+// Passive capture of SpyServer directory reports (and, for the guard, of the
+// client -> SpyServer direction of streaming connections).
 //
 // Live mode uses an AF_PACKET socket with a kernel BPF filter (IPv4, TCP,
-// destination port = directory port), so only the report packets ever reach
-// userspace - the IQ stream on the same interface costs nothing.
+// destination port = directory port or SpyServer port), so only report
+// packets and the small client -> server packets reach userspace. The IQ
+// stream flows server -> client (source port = SpyServer port) and is
+// dropped in the kernel.
 // Replay mode reads a classic pcap file (tcpdump -w) for testing.
 
 import (
@@ -28,28 +31,30 @@ const (
 
 func htons(v uint16) uint16 { return v<<8 | v>>8 }
 
-// bpfTCPDstPort accepts unfragmented IPv4/TCP packets to the given port.
-// Offsets are relative to the IP header (SOCK_DGRAM packet socket).
-func bpfTCPDstPort(port uint16) []syscall.SockFilter {
+// bpfTCPDstPorts accepts unfragmented IPv4/TCP packets to either port
+// (port2 = 0 disables the second match). Offsets are relative to the IP
+// header (SOCK_DGRAM packet socket).
+func bpfTCPDstPorts(port1, port2 uint16) []syscall.SockFilter {
 	return []syscall.SockFilter{
-		{Code: 0x30, K: 0},                          // 0: ldb [0]
-		{Code: 0x54, K: 0xf0},                       // 1: and #0xf0
-		{Code: 0x15, Jt: 0, Jf: 8, K: 0x40},         // 2: jeq #0x40 (IPv4) else drop
-		{Code: 0x30, K: 9},                          // 3: ldb [9]
-		{Code: 0x15, Jt: 0, Jf: 6, K: 6},            // 4: jeq #6 (TCP) else drop
-		{Code: 0x28, K: 6},                          // 5: ldh [6]
-		{Code: 0x45, Jt: 4, Jf: 0, K: 0x1fff},       // 6: jset fragment offset -> drop
-		{Code: 0xb1, K: 0},                          // 7: ldxb 4*([0]&0xf)
-		{Code: 0x48, K: 2},                          // 8: ldh [x+2] (TCP dst port)
-		{Code: 0x15, Jt: 0, Jf: 1, K: uint32(port)}, // 9: jeq #port
-		{Code: 0x06, K: 0xffff},                     // 10: accept
-		{Code: 0x06, K: 0},                          // 11: drop
+		{Code: 0x30, K: 0},                           // 0: ldb [0]
+		{Code: 0x54, K: 0xf0},                        // 1: and #0xf0
+		{Code: 0x15, Jt: 0, Jf: 9, K: 0x40},          // 2: jeq #0x40 (IPv4) else drop
+		{Code: 0x30, K: 9},                           // 3: ldb [9]
+		{Code: 0x15, Jt: 0, Jf: 7, K: 6},             // 4: jeq #6 (TCP) else drop
+		{Code: 0x28, K: 6},                           // 5: ldh [6]
+		{Code: 0x45, Jt: 5, Jf: 0, K: 0x1fff},        // 6: jset fragment offset -> drop
+		{Code: 0xb1, K: 0},                           // 7: ldxb 4*([0]&0xf)
+		{Code: 0x48, K: 2},                           // 8: ldh [x+2] (TCP dst port)
+		{Code: 0x15, Jt: 1, Jf: 0, K: uint32(port1)}, // 9: jeq #port1 -> accept
+		{Code: 0x15, Jt: 0, Jf: 1, K: uint32(port2)}, // 10: jeq #port2 -> accept, else drop
+		{Code: 0x06, K: 0xffff},                      // 11: accept
+		{Code: 0x06, K: 0},                           // 12: drop
 	}
 }
 
 // captureLive blocks forever, calling onPacket for each matching IPv4 packet
 // and onIdle at least every few seconds.
-func captureLive(iface string, port uint16, onPacket func(time.Time, []byte), onIdle func(time.Time)) error {
+func captureLive(iface string, port, port2 uint16, onPacket func(time.Time, []byte), onIdle func(time.Time)) error {
 	ifi, err := net.InterfaceByName(iface)
 	if err != nil {
 		return err
@@ -60,7 +65,7 @@ func captureLive(iface string, port uint16, onPacket func(time.Time, []byte), on
 		return fmt.Errorf("packet socket (needs CAP_NET_RAW): %w", err)
 	}
 	defer syscall.Close(fd)
-	if err := syscall.AttachLsf(fd, bpfTCPDstPort(port)); err != nil {
+	if err := syscall.AttachLsf(fd, bpfTCPDstPorts(port, port2)); err != nil {
 		return fmt.Errorf("attach BPF filter: %w", err)
 	}
 	if err := syscall.Bind(fd, &syscall.SockaddrLinklayer{Protocol: htons(ethPAll), Ifindex: ifi.Index}); err != nil {
@@ -175,8 +180,16 @@ type tcpSegment struct {
 	src, dst     [4]byte
 	sport, dport uint16
 	seq          uint32
+	flags        byte // TCP flags (FIN 0x01, SYN 0x02, RST 0x04, ACK 0x10)
 	payload      []byte
 }
+
+const (
+	tcpFIN = 0x01
+	tcpSYN = 0x02
+	tcpRST = 0x04
+	tcpACK = 0x10
+)
 
 func parseIPv4TCP(p []byte) (tcpSegment, bool) {
 	var s tcpSegment
@@ -197,6 +210,7 @@ func parseIPv4TCP(p []byte) (tcpSegment, bool) {
 	s.sport = binary.BigEndian.Uint16(t[0:2])
 	s.dport = binary.BigEndian.Uint16(t[2:4])
 	s.seq = binary.BigEndian.Uint32(t[4:8])
+	s.flags = t[13]
 	doff := int(t[12]>>4) * 4
 	if doff < 20 || doff > len(t) {
 		return s, false

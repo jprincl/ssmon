@@ -42,7 +42,32 @@ CREATE TABLE IF NOT EXISTS tunings (
 );
 CREATE INDEX IF NOT EXISTS idx_tunings_session ON tunings(session_id, ts);
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS bans (
+  id      INTEGER PRIMARY KEY,
+  ip      TEXT NOT NULL,
+  created REAL NOT NULL,                -- unix time
+  expires REAL,                         -- NULL = permanent
+  lifted  REAL,                         -- set when unbanned or replaced
+  reason  TEXT,
+  rule    TEXT,                         -- reconnect, client, quota, camp, manual
+  auto    INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_bans_ip ON bans(ip);
+CREATE TABLE IF NOT EXISTS events (
+  id     INTEGER PRIMARY KEY,
+  ts     REAL NOT NULL,
+  ip     TEXT NOT NULL,
+  rule   TEXT NOT NULL,
+  action TEXT NOT NULL,                 -- ban, flag, dry-run, whitelisted, unban
+  detail TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 `
+
+// migrations add columns introduced after the first release.
+var migrations = []struct{ table, column, ddl string }{
+	{"sessions", "client", "ALTER TABLE sessions ADD COLUMN client TEXT"},
+}
 
 type Status struct {
 	LastReport float64           `json:"last_report"`
@@ -55,6 +80,13 @@ type openSession struct {
 	ip       string
 	lastSeen float64
 	lastFreq int64
+	mhzSince float64 // when the current MHz (center frequency) was tuned
+}
+
+// clientSeen is the last client name the guard saw for an IP.
+type clientSeen struct {
+	name string
+	ts   float64
 }
 
 type Monitor struct {
@@ -70,6 +102,8 @@ type Monitor struct {
 	// InitialMHz is SpyServer's initial_frequency in MHz (0 = unknown). The
 	// first tuning of a session at this frequency is left out of statistics.
 	InitialMHz int64
+
+	clients map[string]clientSeen
 }
 
 func ts(t time.Time) float64 { return float64(t.UnixNano()) / 1e9 }
@@ -98,6 +132,15 @@ func openDB(path string) (*sql.DB, error) {
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("schema: %w", err)
 	}
+	for _, mg := range migrations {
+		var n int
+		db.QueryRow(`SELECT count(*) FROM pragma_table_info(?) WHERE name = ?`, mg.table, mg.column).Scan(&n)
+		if n == 0 {
+			if _, err := db.Exec(mg.ddl); err != nil {
+				return nil, fmt.Errorf("migration %s.%s: %w", mg.table, mg.column, err)
+			}
+		}
+	}
 	return db, nil
 }
 
@@ -123,6 +166,7 @@ func NewMonitor(dbPath string, geo *Geo, interval, gap time.Duration, anonDays i
 	switch {
 	case err == nil:
 		o.lastFreq = freq.Int64
+		o.mhzSince = o.lastSeen // unknown after a restart; count from now on
 		m.cur = &o
 		db.Exec(`UPDATE sessions SET open = 0 WHERE open = 1 AND id <> ?`, o.id)
 	case err != sql.ErrNoRows:
@@ -215,9 +259,13 @@ func (m *Monitor) HandleReport(t time.Time, fields map[string]string) {
 	if ip != "" {
 		if m.cur == nil {
 			g := m.geo.Lookup(ip)
-			res, err := tx.Exec(`INSERT INTO sessions (ip, start, last_seen, cc, country, city, lat, lon, asn, org)
-			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-				ip, now, now, nullStr(g.CC), nullStr(g.Country), nullStr(g.City), g.Lat, g.Lon, nullInt(g.ASN), nullStr(g.Org))
+			var client any
+			if c, ok := m.clients[ip]; ok && now-c.ts < 600 {
+				client = c.name // HELLO usually arrives before the first report
+			}
+			res, err := tx.Exec(`INSERT INTO sessions (ip, start, last_seen, cc, country, city, lat, lon, asn, org, client)
+			  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				ip, now, now, nullStr(g.CC), nullStr(g.Country), nullStr(g.City), g.Lat, g.Lon, nullInt(g.ASN), nullStr(g.Org), client)
 			if err != nil {
 				log.Printf("db insert session: %v", err)
 				return
@@ -231,6 +279,9 @@ func (m *Monitor) HandleReport(t time.Time, fields map[string]string) {
 		}
 		if freq > 0 && freq != m.cur.lastFreq {
 			tx.Exec(`INSERT INTO tunings (session_id, ts, freq) VALUES (?, ?, ?)`, m.cur.id, now, freq)
+			if m.cur.lastFreq/1000000 != freq/1000000 || m.cur.mhzSince == 0 {
+				m.cur.mhzSince = now
+			}
 			m.cur.lastFreq = freq
 		}
 	}
@@ -348,4 +399,35 @@ func nullInt(v uint64) any {
 		return nil
 	}
 	return int64(v)
+}
+
+// SetClient records the client name the guard decoded from a HELLO and
+// attaches it to the open session of that IP.
+func (m *Monitor) SetClient(ip, name string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.clients == nil {
+		m.clients = map[string]clientSeen{}
+	}
+	now := ts(time.Now())
+	m.clients[ip] = clientSeen{name, now}
+	for k, c := range m.clients {
+		if now-c.ts > 3600 {
+			delete(m.clients, k)
+		}
+	}
+	if m.cur != nil && m.cur.ip == ip {
+		m.db.Exec(`UPDATE sessions SET client = ? WHERE id = ?`, name, m.cur.id)
+	}
+}
+
+// CampInfo describes the open session for the camping rule: its IP, the
+// current MHz and since when it has been tuned there.
+func (m *Monitor) CampInfo() (ip string, mhz int64, since float64, ok bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cur == nil || m.cur.mhzSince == 0 {
+		return "", 0, 0, false
+	}
+	return m.cur.ip, m.cur.lastFreq / 1000000, m.cur.mhzSince, true
 }

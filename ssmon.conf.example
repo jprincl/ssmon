@@ -1,0 +1,54 @@
+# ssmon.conf - SpyServer protection (guard) and dashboard admin login.
+# Use with:  ssmon -config /etc/ssmon/ssmon.conf
+# Reload after editing:  sudo systemctl reload ssmon
+# Format: key = value, '#' starts a comment, lists are comma separated,
+# durations like 30s, 10m, 1h30m, 7d.
+
+# --- Admin login (ban/unban from the dashboard) ---------------------------
+# Create the line with:  /usr/local/bin/ssmon -hash-password
+# Without it the dashboard stays read-only.
+#admin_password_hash = pbkdf2-sha256$210000$...
+
+# --- Guard -----------------------------------------------------------------
+guard_enabled = true
+# true = only record what WOULD be banned (events with "dry-run"); start here,
+# check the events in the dashboard for a few days, then set to false.
+dry_run = true
+# nft = enforce bans with nftables, none = record only
+firewall = nft
+# SpyServer port as seen on the capture interface (-iface), e.g. on wg0
+spyserver_port = 5555
+# Public port that is blocked for banned IPs (before DNAT)
+ban_port = 5555
+
+# Never banned automatically (manual bans still possible). IPs or CIDR.
+whitelist_ips = 203.0.113.10, 198.51.100.0/24
+# Allowed clients: the HELLO name must CONTAIN one of these (case-insensitive)
+whitelist_clients = SDR++, SDR#
+
+# Each rule: off | flag (event only) | ban
+
+# Fast reconnect: a new connection within reconnect_window after the previous
+# one from the same IP ended (e.g. auto-reconnect after the session limit).
+reconnect_action = ban
+reconnect_window = 2s
+# how many fast reconnects within reconnect_period trigger the rule
+reconnect_count = 1
+reconnect_period = 10m
+
+# Unknown client: name without a whitelisted part, or no HELLO at all
+unknown_client_action = ban
+
+# Quota: total connected time of one IP within a sliding window
+quota_action = flag
+quota_time = 90m
+quota_window = 3h
+
+# Camping: same MHz (receiver center frequency) for longer than camp_time
+camp_action = flag
+camp_time = 2h
+
+# Escalating ban length per repeat offense (permanent = never expires),
+# counting bans of the same IP within ban_memory.
+ban_durations = 1h, 24h, 7d
+ban_memory = 30d

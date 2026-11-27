@@ -88,8 +88,9 @@ type SessionRow struct {
 	Lon        *float64   `json:"lon,omitempty"`
 	ASN        int64      `json:"asn,omitempty"`
 	Org        string     `json:"org,omitempty"`
-	Freqs      []FreqSpan `json:"freqs"`   // distinct MHz values in order of first use (initial one excluded)
-	Tunings    int        `json:"tunings"` // number of tuning entries in the session (all)
+	Client     string     `json:"client,omitempty"` // client name from HELLO (guard)
+	Freqs      []FreqSpan `json:"freqs"`            // distinct MHz values in order of first use (initial one excluded)
+	Tunings    int        `json:"tunings"`          // number of tuning entries in the session (all)
 	IPSessions int        `json:"ip_sessions"`
 }
 
@@ -268,6 +269,7 @@ func (m *Monitor) Sessions(since, iv float64, q string, limit, offset int, lang 
 			`lower(s.ip) LIKE :like`, `lower(coalesce(s.city, '')) LIKE :like`,
 			`lower(coalesce(s.country, '')) LIKE :like`, `lower(coalesce(s.cc, '')) LIKE :like`,
 			`lower(coalesce(s.org, '')) LIKE :like`, `('as' || coalesce(s.asn, '')) LIKE :like`,
+			`lower(coalesce(s.client, '')) LIKE :like`,
 		}
 		args = append(args, sql.Named("like", like))
 		if f, err := strconv.ParseFloat(strings.ReplaceAll(q, ",", "."), 64); err == nil && f > 0 {
@@ -308,7 +310,7 @@ func (m *Monitor) querySessions(where string, args []any, since, iv float64, lim
 		all = append(all, sql.Named("init", m.InitialMHz))
 	}
 	rows, err := qry(m.db, `SELECT s.id, s.ip, s.start, s.last_seen, `+durExpr+`, s.open,
-	    coalesce(s.cc, ''), coalesce(s.country, ''), coalesce(s.city, ''), s.lat, s.lon, coalesce(s.asn, 0), coalesce(s.org, ''),
+	    coalesce(s.cc, ''), coalesce(s.country, ''), coalesce(s.city, ''), s.lat, s.lon, coalesce(s.asn, 0), coalesce(s.org, ''), coalesce(s.client, ''),
 	    (SELECT group_concat(mhz || ':' || secs || ':' || freq) FROM (
 	        SELECT mhz, sum(d) AS secs, min(ts) AS first, min(freq) AS freq FROM (
 	          SELECT `+mhzExpr+` AS mhz, t.ts, t.freq,
@@ -328,7 +330,7 @@ func (m *Monitor) querySessions(where string, args []any, since, iv float64, lim
 		var lat, lon sql.NullFloat64
 		var freqs sql.NullString
 		if err := rows.Scan(&r.ID, &r.IP, &r.Start, &r.Last, &r.Secs, &r.Open, &r.CC, &r.Country, &r.City,
-			&lat, &lon, &r.ASN, &r.Org, &freqs, &r.Tunings, &r.IPSessions); err != nil {
+			&lat, &lon, &r.ASN, &r.Org, &r.Client, &freqs, &r.Tunings, &r.IPSessions); err != nil {
 			return nil, err
 		}
 		if lat.Valid && lon.Valid {
