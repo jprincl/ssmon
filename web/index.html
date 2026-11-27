@@ -284,7 +284,8 @@ const I18N = {
     gOn: "ochrana zapnuta", gOff: "ochrana vypnuta", gDry: "jen sledování (dry-run)", gLive: "ostré banování", gNoFw: "firewall: jen log",
     rule: { reconnect: "rychlý reconnect", client: "klient", quota: "kvóta", camp: "kempování", manual: "ručně" },
     action: { ban: "ban", flag: "označeno", "dry-run": "dry-run", whitelisted: "whitelist", unban: "odban" },
-    thEvTime: "Čas", thEvIP: "IP", thEvRule: "Pravidlo", thEvDetail: "Detail", thBanReason: "Důvod", thBanUntil: "Platnost",
+    thEvTime: "Čas", thEvIP: "IP", thEvRule: "Pravidlo", thEvDetail: "Detail", thBanReason: "Důvod", thBanUntil: "Platnost", thBanLen: "Délka",
+    banStep: (n, m) => `stupeň ${n}/${m}`, banManual: (n) => `ruční, ${n}. ban`, banNth: (n) => `${n}. ban`, banNext: (d) => `příští ${d}`,
     actionFail: (e) => `Akce selhala: ${e}`,
   },
   en: {
@@ -317,7 +318,8 @@ const I18N = {
     gOn: "protection on", gOff: "protection off", gDry: "watch only (dry-run)", gLive: "live banning", gNoFw: "firewall: log only",
     rule: { reconnect: "fast reconnect", client: "client", quota: "quota", camp: "camping", manual: "manual" },
     action: { ban: "ban", flag: "flagged", "dry-run": "dry-run", whitelisted: "whitelist", unban: "unban" },
-    thEvTime: "Time", thEvIP: "IP", thEvRule: "Rule", thEvDetail: "Detail", thBanReason: "Reason", thBanUntil: "Valid",
+    thEvTime: "Time", thEvIP: "IP", thEvRule: "Rule", thEvDetail: "Detail", thBanReason: "Reason", thBanUntil: "Valid", thBanLen: "Length",
+    banStep: (n, m) => `step ${n}/${m}`, banManual: (n) => `manual, ban #${n}`, banNth: (n) => `ban #${n}`, banNext: (d) => `next ${d}`,
     actionFail: (e) => `Action failed: ${e}`,
   },
 };
@@ -644,10 +646,35 @@ function fmtUntil(b) {
   return t("until") + " " + fmtTime(b.expires);
 }
 
+// Compact duration: 45s, 10m, 1h30m, 2d (0 = permanent).
+function fmtBanLen(sec) {
+  if (!sec) return t("permanent");
+  sec = Math.round(sec);
+  if (sec % 86400 === 0) return sec / 86400 + "d";
+  if (sec < 60) return sec + "s";
+  if (sec < 3600) return Math.round(sec / 60) + "m";
+  const h = Math.floor(sec / 3600), m = Math.round((sec % 3600) / 60);
+  return m ? `${h}h${m}m` : `${h}h`;
+}
+
+// Ban length plus its place in the escalation series.
+function fmtBanLevel(b, withNext) {
+  const len = fmtBanLen(b.expires ? b.expires - b.created : 0);
+  let sub = "";
+  if (b.steps) {
+    const step = Math.min(b.level, b.steps);
+    sub = b.auto ? t("banStep", step, b.steps) : t("banManual", b.level);
+    if (b.auto && b.level > b.steps) sub += " · " + t("banNth", b.level);
+  }
+  if (withNext) sub += (sub ? " · " : "") + t("banNext", fmtBanLen(b.next));
+  return `<b>${len}</b>${sub ? `<div class="client">${sub}</div>` : ""}`;
+}
+
 function banTable(list, withUnban) {
-  return `<table class="mini"><thead><tr><th>IP</th><th>${t("thEvRule")}</th><th>${t("thBanReason")}</th><th>${t("thBanUntil")}</th>${withUnban ? "<th></th>" : ""}</tr></thead><tbody>` +
+  return `<table class="mini"><thead><tr><th>IP</th><th>${t("thEvRule")}</th><th>${t("thBanReason")}</th><th>${t("thBanLen")}</th><th>${t("thBanUntil")}</th>${withUnban ? "<th></th>" : ""}</tr></thead><tbody>` +
     list.map((b) => `<tr><td><span class="mono">${esc(b.ip)}</span><div class="client">${flag(b.cc)} ${esc(b.org || "")}</div></td>
       <td>${esc(t("rule")[b.rule] || b.rule)}</td><td class="detail-txt">${esc(b.reason)}</td>
+      <td>${fmtBanLevel(b, withUnban)}</td>
       <td>${withUnban ? fmtUntil(b) : t("since") + " " + fmtTime(b.created)}</td>
       ${withUnban ? `<td><button class="unban-btn" data-unban="${esc(b.ip)}">${t("unban")}</button></td>` : ""}</tr>`).join("") + "</tbody></table>";
 }
