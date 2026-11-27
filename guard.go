@@ -6,7 +6,8 @@ package main
 // (SYN/FIN/RST, ACKs and the first command) and applies the rules from
 // ssmon.conf:
 //   - reconnect: a new connection shortly after the previous one ended
-//     (automatic reconnect after a kick, bots hammering the server),
+//     (automatic reconnect after a kick, bots hammering the server); short
+//     previous connections (server full) are ignored,
 //   - client:    the HELLO client name contains no whitelisted part, or
 //                the client sent something other than HELLO first,
 //   - quota:     total connected time per IP within a sliding window,
@@ -46,7 +47,7 @@ type gconn struct {
 type span struct{ start, end time.Time }
 
 type ipState struct {
-	lastEnd   time.Time   // end of the most recent closed connection
+	lastEnd   time.Time   // end of the most recent closed connection that lasted >= ReconnectMinSession
 	fast      []time.Time // fast reconnects within ReconnectPeriod
 	history   []span      // closed connections within QuotaWindow
 	lastTouch time.Time
@@ -208,7 +209,9 @@ func (g *Guard) state(ip string, ts time.Time) *ipState {
 func (g *Guard) closeConn(k connKey, c *gconn, end time.Time) {
 	delete(g.conns, k)
 	st := g.state(c.ip, end)
-	if end.After(st.lastEnd) {
+	// Short connections (e.g. rejected because the server is full) do not
+	// count as a session that a fast reconnect could follow.
+	if end.Sub(c.start) >= g.cfg.ReconnectMinSession && end.After(st.lastEnd) {
 		st.lastEnd = end
 	}
 	st.history = append(st.history, span{c.start, end})

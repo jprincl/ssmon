@@ -37,11 +37,14 @@ type Config struct {
 	WhitelistClients []string // case-insensitive substrings of the client name
 
 	// Fast reconnect: a new connection within ReconnectWindow after the
-	// previous one from the same IP ended.
-	ReconnectAction string
-	ReconnectWindow time.Duration
-	ReconnectCount  int           // fast reconnects needed to trigger
-	ReconnectPeriod time.Duration // ... within this period
+	// previous one from the same IP ended. Only a previous connection that
+	// lasted at least ReconnectMinSession counts, so retries against a full
+	// server (rejected within a second) are not punished.
+	ReconnectAction     string
+	ReconnectWindow     time.Duration
+	ReconnectMinSession time.Duration
+	ReconnectCount      int           // fast reconnects needed to trigger
+	ReconnectPeriod     time.Duration // ... within this period
 
 	// Unknown client: HELLO name not on the client whitelist, or no HELLO.
 	UnknownClientAction string
@@ -71,6 +74,7 @@ func defaultConfig() *Config {
 		WhitelistClients:    []string{"SDR++", "SDR#"},
 		ReconnectAction:     actBan,
 		ReconnectWindow:     2 * time.Second,
+		ReconnectMinSession: 30 * time.Second,
 		ReconnectCount:      1,
 		ReconnectPeriod:     10 * time.Minute,
 		UnknownClientAction: actBan,
@@ -162,6 +166,8 @@ func (c *Config) set(k, v string) error {
 		c.ReconnectAction, err = parseAction(v)
 	case "reconnect_window":
 		c.ReconnectWindow, err = parseDur(v)
+	case "reconnect_min_session":
+		c.ReconnectMinSession, err = parseDur(v)
 	case "reconnect_count":
 		c.ReconnectCount, err = strconv.Atoi(v)
 		if err == nil && c.ReconnectCount < 1 {

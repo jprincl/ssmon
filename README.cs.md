@@ -12,8 +12,11 @@ Nic nevkládá do datové cesty SpyServeru. Jen pasivně čte stavové reporty, 
 - data v SQLite, statistiky se počítají dotazy SQL na serveru (rychlé i s roky historie),
 - offline geolokace IP adres (DB-IP Lite / GeoLite2, soubory MMDB), bez externích API,
 - filtr BPF v jádře propustí do programu jen pakety reportů, IQ stream na stejném rozhraní nic nestojí,
-- běží jako neprivilegovaný uživatel s jediným oprávněním `CAP_NET_RAW`, spotřeba RAM ~10–20 MB,
-- dvojjazyčný dashboard (čeština / angličtina), přepínání vlajkami.
+- běží jako neprivilegovaný uživatel jen s oprávněním `CAP_NET_RAW` (a `CAP_NET_ADMIN`, pokud se
+  používají bany),
+- dvojjazyčný dashboard (čeština / angličtina), přepínání vlajkami,
+- volitelná **ochrana proti zneužívání**: automatické bany (rychlý reconnect, neznámý klient, kvóta,
+  kempování) a ruční ban a odban z dashboardu po přihlášení správce, vynucené přes nftables.
 
 ---
 
@@ -29,11 +32,12 @@ Nic nevkládá do datové cesty SpyServeru. Jen pasivně čte stavové reporty, 
 9. [GeoIP databáze a jejich aktualizace](#geoip-databáze-a-jejich-aktualizace)
 10. [Pásma (bands.txt)](#pásma-bandstxt)
 11. [Dashboard](#dashboard)
-12. [Databáze](#databáze)
-13. [Údržba a aktualizace](#údržba-a-aktualizace)
-14. [Řešení problémů](#řešení-problémů)
-15. [Struktura projektu](#struktura-projektu)
-16. [Licence a uvedení zdrojů](#licence-a-uvedení-zdrojů)
+12. [Ochrana proti zneužívání (guard)](#ochrana-proti-zneužívání-guard)
+13. [Databáze](#databáze)
+14. [Údržba a aktualizace](#údržba-a-aktualizace)
+15. [Řešení problémů](#řešení-problémů)
+16. [Struktura projektu](#struktura-projektu)
+17. [Licence a uvedení zdrojů](#licence-a-uvedení-zdrojů)
 
 ---
 
@@ -117,7 +121,8 @@ v databázi z nich zůstane **1 řádek relace a 5 řádků ladění**. Délka r
 - **Rozlišení času je ~15 s** (interval reportů). Relace kratší než jeden interval nemusí být vidět
   vůbec a délky jsou přibližné.
 - Počítá se s **`MaxClients=1`**, tedy s jednou IP v `CurrentClients`.
-- Verze klientského SW se v reportech nepřenáší.
+- Klientský software v reportech není. ssmon ho místo toho čte z HELLO každého nového streamovacího
+  spojení (viz [ochrana](#ochrana-proti-zneužívání-guard)).
 - Jen IPv4 (reporty i klienti).
 
 ---
@@ -128,6 +133,7 @@ v databázi z nich zůstane **1 řádek relace a 5 řádků ladění**. Délka r
 - Linux se systemd (testováno na Ubuntu), architektura amd64 nebo arm64,
 - rozhraní, kterým tečou reporty SpyServeru do adresáře (např. `wg0` na VPS),
 - `curl` a `gunzip` pro stahování GeoIP databází,
+- `nft` (balík `nftables`), pokud se používají bany,
 - volitelně `sqlite3` pro vlastní dotazy a zálohy.
 
 **Sestavení:** Go ≥ 1.22 na libovolném počítači (Windows, Linux, macOS). Na slabé VPS s 1 GB RAM
@@ -211,7 +217,7 @@ ssmon: geoip: loaded city database /opt/ssmon/geoip/dbip-city-lite.mmdb (DBIP-Ci
 ssmon: geoip: loaded ASN database /opt/ssmon/geoip/dbip-asn-lite.mmdb (DBIP-ASN-Lite ...)
 ssmon: database ./test.db: 0 sessions
 ssmon: dashboard on :8090
-ssmon: capturing directory reports on wg0, TCP port 8080
+ssmon: capturing on wg0: directory reports (TCP 8080), SpyServer clients (TCP 5555)
 ```
 
 Pak se ke svému SpyServeru připoj (SDR++, SDR#…). Do 15 s se objeví
@@ -267,9 +273,10 @@ ExecStart=/usr/local/bin/ssmon \
     -listen :8090 \                       # dashboard on port 8090, all interfaces
     -initial-mhz 145 \                    # SpyServer initial_frequency (not counted)
     -bands /opt/ssmon/bands.txt \         # band plan
+    -config /etc/ssmon/ssmon.conf \       # guard rules + admin login (optional)
     -geoip-city /opt/ssmon/geoip/dbip-city-lite.mmdb \
     -geoip-asn /opt/ssmon/geoip/dbip-asn-lite.mmdb
-ExecReload=/bin/kill -HUP $MAINPID        # systemctl reload = reload GeoIP + backfill
+ExecReload=/bin/kill -HUP $MAINPID        # systemctl reload = reload GeoIP + config, backfill
 Restart=always                            # restart on crash
 RestartSec=5
 ```
@@ -281,14 +288,14 @@ RestartSec=5
 |---|---|
 | `DynamicUser=yes` | běží pod dočasným neprivilegovaným uživatelem vytvořeným systemd |
 | `StateDirectory=ssmon` | systemd vytvoří zapisovatelný `/var/lib/ssmon` (fyzicky `/var/lib/private/ssmon`) |
-| `AmbientCapabilities=CAP_NET_RAW` | jediné oprávnění: zachytávání paketů z rozhraní |
-| `CapabilityBoundingSet=CAP_NET_RAW` | žádná další oprávnění nelze získat |
+| `AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN` | `CAP_NET_RAW` = zachytávání paketů z rozhraní; `CAP_NET_ADMIN` = správa sady banů ve vlastní tabulce nftables (jen kvůli banům) |
+| `CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN` | žádná další oprávnění nelze získat |
 | `NoNewPrivileges=yes` | zákaz eskalace oprávnění |
 | `ProtectSystem=strict` | celý systém jen pro čtení (kromě `StateDirectory`) |
 | `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes` | bez přístupu k /home, vlastní /tmp, žádná zařízení |
 | `ProtectKernelTunables/Modules`, `ProtectControlGroups` | bez zásahů do jádra a cgroups |
 | `RestrictAddressFamilies=AF_PACKET AF_NETLINK AF_INET AF_INET6 AF_UNIX` | povolené typy socketů: zachytávání (`AF_PACKET`), zjištění rozhraní (`AF_NETLINK`), web a DNS |
-| `MemoryMax=200M` | pojistka proti úniku paměti |
+| `MemoryMax=200M` | pojistka proti úniku paměti. Samotná databáze DB-IP City zabere v paměti přes 100 MB a při `reload` GeoIP se na chvíli drží dvě kopie, proto je bezpečnější `MemoryMax=400M`. |
 
 Po každé úpravě souboru: `sudo systemctl daemon-reload && sudo systemctl restart ssmon`.
 
@@ -310,9 +317,11 @@ Po každé úpravě souboru: `sudo systemctl daemon-reload && sudo systemctl res
 | `-gap` | `45s` | po jaké době bez reportu se relace uzavře |
 | `-anonymize-after` | `0` | po N dnech zkrátit IP na /24 (IPv4) nebo /48 (IPv6); 0 = nikdy |
 | `-pcap` | – | přehrát soubor `tcpdump -w` do databáze a skončit (pro testování) |
+| `-config` | – | `ssmon.conf` s pravidly ochrany a přihlášením správce (viz [ochrana](#ochrana-proti-zneužívání-guard)); bez něj je ochrana vypnutá a dashboard jen pro čtení |
+| `-hash-password` | – | načte heslo ze stdin, vypíše řádek `admin_password_hash` pro `ssmon.conf` a skončí |
 
-**Signály:** `SIGHUP` (`systemctl reload ssmon`) znovu načte GeoIP databáze a doplní polohu relacím,
-které ji nemají. `SIGTERM`/`SIGINT` program korektně ukončí.
+**Signály:** `SIGHUP` (`systemctl reload ssmon`) znovu načte GeoIP databáze a `ssmon.conf` a doplní
+polohu relacím, které ji nemají. `SIGTERM`/`SIGINT` program korektně ukončí.
 
 ---
 
@@ -373,11 +382,12 @@ v prohlížeči.
 - **statistiky:** země, pásma a kmitočty (MHz) podle času poslechu, aktivita podle hodin a dnů,
   sítě (ASN) s označením hostingových a cloudových sítí (štítek **DC**),
 - **tabulka relací:** filtr (IP, město, země, síť, `AS1234`, MHz, název pásma), stránkování po 50,
-  posledních 6 kmitočtů v MHz, tlačítko **▸ N×** s celým průběhem ladění, štítek u IP
-  s 10 a více relacemi v období (typicky boti),
+  jméno klienta pod každou IP (např. `SDR++ · 2.0.1700`), posledních 6 kmitočtů v MHz, tlačítko
+  **▸ N×** s celým průběhem ladění, štítek u IP s 10 a více relacemi v období (typicky boti),
 - přepínač období: 24 h / 7 dní / 30 dní / vše.
 
-Dashboard nemá přihlášení. **Přístup omez firewallem**, např.
+Prohlížení nevyžaduje přihlášení. Ban a odban jsou za přihlášením správce (viz
+[Správa v dashboardu](#správa-v-dashboardu)). **Přístup přesto omez firewallem**, např.
 `ufw allow from <tvoje-IP> to any port 8090 proto tcp`, nebo ho pusť jen na VPN rozhraní
 (`-listen 10.77.77.1:8090`).
 
@@ -391,6 +401,137 @@ Dashboard nemá přihlášení. **Přístup omez firewallem**, např.
 
 Všechny endpointy přijímají `lang=cs` (výchozí) nebo `lang=en` pro názvy pásem.
 
+Správa (vyžaduje cookie relace, POST navíc hlavičku `X-SSMon-Admin: 1`):
+
+| endpoint | popis |
+|---|---|
+| `GET /api/me` | stav přihlášení a ochrany |
+| `POST /api/login` `{"password": "…"}` / `POST /api/logout` | přihlášení / odhlášení |
+| `GET /api/admin/bans` | aktivní a ukončené bany |
+| `GET /api/admin/events?limit=100` | události ochrany |
+| `POST /api/admin/ban` `{"ip": "…", "hours": 24, "reason": "…"}` | ruční ban (`hours: 0` = trvale) |
+| `POST /api/admin/unban` `{"ip": "…"}` | zrušení banu |
+
+---
+
+## Ochrana proti zneužívání (guard)
+
+Kromě reportů pro adresář umí ssmon sledovat i směr **klient → SpyServer** u streamovacích spojení
+(SYN, FIN, RST, potvrzovací pakety ACK a první příkaz). Z HELLO SpyServeru přečte jméno klienta a podle
+pravidel v `ssmon.conf` reaguje. Každé pravidlo má akci `off`, `flag` (jen událost) nebo `ban`. Bany
+vynucuje **vlastní tabulka ssmonu v nftables**.
+
+| pravidlo | klíč | výchozí nastavení | co chytá |
+|---|---|---|---|
+| rychlý reconnect | `reconnect_*` | **ban** po 1 novém připojení do 2 s po skončení předchozího (trvalo ≥ 30 s) | automatický reconnect po odpojení limitem relace, boty |
+| neznámý klient | `unknown_client_action` | **ban**, když jméno v HELLO neobsahuje nic z `whitelist_clients` nebo HELLO chybí | nestandardní klienty |
+| kvóta | `quota_*` | označit, když je IP připojená > 90 min za 3 h | obcházení limitu relace |
+| kempování | `camp_*` | označit, když se drží stejné MHz > 2 h | kempování na jedné frekvenci |
+
+> **Proč ssmon ukazoval „dvouhodinové relace“ i přes limit 30 minut:** SpyServer klienta odpojil,
+> ale ten se do sekundy připojil znovu a 15sekundové reporty mezeru nezachytily. Právě to chytá
+> pravidlo rychlého reconnectu.
+
+**Automatické bany se stupňují** podle počtu banů stejné IP během `ban_memory`, a to podle řady
+v `ban_durations`. Řada je společná pro všechna pravidla a jako předchozí prohřešek se počítá i ruční
+ban. Například `ban_durations = 10m, 1h, 2h, 6h, 24h, 7d` znamená 10 minut za první prohřešek
+a od šestého dál 7 dní. IP z `whitelist_ips` se automaticky nebanují nikdy (událost se zapíše jako
+„whitelist“). S `dry_run = true` se nebanuje nic, události jen ukazují, co *by* se stalo.
+
+**Jak ban funguje:** tabulka `table inet ssmon` obsahuje sadu `banned` (každá položka má vlastní
+timeout) a pravidlo v `prerouting` s prioritou `raw` (-300), tedy ještě před conntrackem a DNAT:
+`ip saddr @banned tcp dport <ban_port> drop`. Blokuje se jen port SpyServeru, SSH tedy ohrožené
+není. Běžící stream zabanované IP se hned zastaví a dočasné bany vyprší v jádře samy. Tabulka je
+nezávislá na ufw, při každém startu se obnoví z databáze a po zastavení ssmonu zůstává aktivní.
+
+### ssmon.conf
+
+Šablona s komentáři je v `ssmon.conf.example`. Formát: `klíč = hodnota`, `#` je komentář, seznamy se
+oddělují čárkou, doby se zapisují jako `30s`, `10m`, `1h30m`, `7d`. Neznámý klíč je chyba, takže
+překlep se ukáže hned při startu.
+
+| klíč | výchozí | význam |
+|---|---|---|
+| `admin_password_hash` | – | přihlášení správce do dashboardu (`ssmon -hash-password`); prázdné = dashboard jen pro čtení |
+| `guard_enabled` | `false` | hlavní vypínač pravidel |
+| `dry_run` | `true` | jen zaznamenávat, co by se zabanovalo, nebanovat |
+| `firewall` | `nft` | `nft` = bany se vynucují, `none` = jen záznam |
+| `spyserver_port` | `5555` | port SpyServeru na sledovaném rozhraní (`-iface`); změna vyžaduje restart |
+| `ban_port` | `5555` | veřejný port blokovaný pro zabanované IP (před DNAT) |
+| `whitelist_ips` | – | IP nebo CIDR, které se automaticky nebanují nikdy |
+| `whitelist_clients` | `SDR++, SDR#` | povolení klienti: jméno v HELLO musí **obsahovat** jednu z položek (bez ohledu na velikost písmen) |
+| `reconnect_action` / `_window` / `_count` / `_period` | `ban` / `2s` / `1` / `10m` | rychlý reconnect: `count` připojení do `window` po odpojení během `period` |
+| `reconnect_min_session` | `30s` | počítá se jen předchozí spojení, které trvalo aspoň takhle dlouho. Při plném serveru SpyServer spojení odmítne do sekundy, takže opakované pokusy dostat se dovnitř se netrestají. |
+| `unknown_client_action` | `ban` | neznámé jméno klienta nebo chybějící HELLO |
+| `quota_action` / `_time` / `_window` | `flag` / `90m` / `3h` | doba připojení jedné IP v klouzavém okně |
+| `camp_action` / `_time` | `flag` / `2h` | příliš dlouho stejné MHz |
+| `ban_durations` | `1h, 24h, 7d` | délka automatického banu podle pořadí prohřešku; `permanent` = nevyprší |
+| `ban_memory` | `30d` | jak dlouho se dřívější bany počítají jako předchozí prohřešky |
+
+### Nastavení
+
+```sh
+sudo apt install -y nftables       # only the nft command; do NOT enable nftables.service
+                                   # (its /etc/nftables.conf starts with "flush ruleset")
+sudo mkdir -p /etc/ssmon
+sudo cp ssmon.conf.example /etc/ssmon/ssmon.conf
+sudo chmod 644 /etc/ssmon/ssmon.conf   # the service user must be able to read it
+/usr/local/bin/ssmon -hash-password    # paste the printed line into ssmon.conf
+sudo nano /etc/ssmon/ssmon.conf        # whitelist_ips = your IP(s); keep dry_run = true at first
+```
+
+Služba potřebuje parametr `-config /etc/ssmon/ssmon.conf` a oprávnění `CAP_NET_RAW CAP_NET_ADMIN`
+(viz [Popis souboru ssmon.service](#popis-souboru-ssmonservice)). Potom:
+
+```sh
+sudo systemctl daemon-reload && sudo systemctl restart ssmon
+journalctl -u ssmon -n 20 --no-pager   # "guard: firewall nft ready (ban port 5555), N active bans restored"
+sudo nft list table inet ssmon
+```
+
+Ověř, že provoz klientů prochází sledovaným rozhraním:
+`sudo tcpdump -i wg0 -nn -c 5 'tcp dst port 5555'`. Pokud SpyServer používá jiný port, nastav
+`spyserver_port` (port na sledovaném rozhraní) a `ban_port` (veřejný port před DNAT, viz
+`sudo iptables -t nat -S | grep DNAT`).
+
+Pár dní nech běžet režim dry-run a projdi události v dashboardu. Pak nastav `dry_run = false`
+a spusť `sudo systemctl reload ssmon`. Config se načte znovu bez restartu.
+
+Mírnější nastavení, například automaticky banovat jen rychlý reconnect a zbytek jen označovat:
+```
+dry_run = false
+unknown_client_action = flag
+ban_durations = 10m, 1h, 2h, 6h, 24h, 7d
+ban_memory = 7d
+```
+
+### Správa v dashboardu
+
+Když je nastavený `admin_password_hash`, objeví se v hlavičce tlačítko **🔒 Správa**. Po přihlášení:
+- v tabulce relací je u každé IP tlačítko **⛔** a zabanované IP mají štítek **BAN**,
+- panel **Ochrana SpyServeru** ukazuje stav ochrany (zapnuto/vypnuto, dry-run, firewall) a obsahuje
+  pole pro ban libovolné IP, **aktivní bany** s tlačítkem **Odbanovat**, **ukončené bany**
+  a **poslední události** (ban, označeno, dry-run, whitelist, odban).
+
+**Ruční ban** trvá přesně tak dlouho, jak vybereš v dialogu: 1 hodina, 24 hodin (předvolené),
+7 dní, 30 dní nebo trvale (do odbanování). Řadu `ban_durations` nepoužívá, ale pro pozdější
+automatické bany se počítá jako předchozí prohřešek.
+
+Přihlášení drží cookie relace (HttpOnly, SameSite=Strict, 12 h; restart služby tě odhlásí). Po
+5 neúspěšných pokusech z jedné IP během 15 minut se další přihlášení na chvíli odmítají. Každá akce
+navíc vyžaduje hlavičku `X-SSMon-Admin` (ochrana proti CSRF). Dashboard běží přes HTTP, takže port
+8090 nech omezený (ufw na tvou IP, VPN), nebo ho dej za HTTPS (např. Caddy).
+
+### Poznámky
+
+- **Jména klientů** (např. `SDR++ · 2.0.1700`, tedy jméno a verze protokolu) se zobrazují pod IP
+  v tabulce relací, a to i s vypnutou ochranou. Objeví se jen u spojení, která začala za běhu ssmonu.
+  U streamu, který běžel už před startem ssmonu, není HELLO z čeho přečíst, a pravidlo klienta ho
+  proto vynechá.
+- Jméno klienta jde podvrhnout. Whitelist klientů zastaví naivní boty a podivné klienty, ne
+  odhodlaného útočníka. Pravidlo rychlého reconnectu na jménu nezávisí.
+- Jen IPv4. Detaily pravidel v událostech jsou anglicky.
+
 ---
 
 ## Databáze
@@ -401,9 +542,11 @@ Adresář je přístupný jen rootovi.
 
 | tabulka | obsah |
 |---|---|
-| `sessions` | jedna řádka za relaci: `ip`, `start`, `last_seen` (unix čas), `reports`, `open`, `cc`, `country`, `city`, `lat`, `lon`, `asn`, `org` |
+| `sessions` | jedna řádka za relaci: `ip`, `start`, `last_seen` (unix čas), `reports`, `open`, `cc`, `country`, `city`, `lat`, `lon`, `asn`, `org`, `client` |
 | `tunings` | změny kmitočtu v relaci: `session_id`, `ts`, `freq` (Hz, přesná hodnota z reportu) |
 | `kv` | poslední report (`status`) a čas posledního startu |
+| `bans` | bany: `ip`, `created`, `expires` (NULL = trvale), `lifted` (odbanováno nebo nahrazeno), `reason`, `rule`, `auto` |
+| `events` | události ochrany: `ts`, `ip`, `rule`, `action` (ban, flag, dry-run, whitelisted, unban), `detail` |
 
 Příklady dotazů (`sudo apt install sqlite3`):
 ```sh
@@ -433,12 +576,15 @@ dnech zkrátí na /24. Poloha a síť zůstanou, statistiky tedy nepřijdou o ni
 | nová verze programu | `sudo install -m 755 ssmon /usr/local/bin/ssmon && sudo systemctl restart ssmon` |
 | změna parametrů | uprav `/etc/systemd/system/ssmon.service`, pak `sudo systemctl daemon-reload && sudo systemctl restart ssmon` |
 | změna pásem | uprav `/opt/ssmon/bands.txt`, pak `sudo systemctl restart ssmon` |
+| změna pravidel ochrany / hesla správce | uprav `/etc/ssmon/ssmon.conf`, pak `sudo systemctl reload ssmon` |
+| výpis banů ve firewallu | `sudo nft list set inet ssmon banned` |
 | aktualizace GeoIP | `sudo /opt/ssmon/update-geoip.sh` (běžně z cronu) |
 | log | `journalctl -u ssmon -f` |
 | stav | `systemctl status ssmon --no-pager` |
 
-Při startu programu se vytvoří schéma databáze, pokud chybí. Nové verze se starou databází
-počítají.
+Při startu programu se vytvoří schéma databáze, pokud chybí, a nové sloupce a tabulky se doplní
+automaticky. Nové verze se starou databází počítají a starší verze poběží i nad novější databází
+(co nezná, ignoruje).
 
 ---
 
@@ -453,6 +599,10 @@ počítají.
 | `geoip: no database loaded` | chybí parametry `-geoip-city`/`-geoip-asn` nebo soubory. Spusť `update-geoip.sh`. |
 | `route ip+net: no such network interface` | špatné jméno rozhraní v `-iface` (`ip -br link`, `sudo wg show`). |
 | dashboard „Offline“, žádné relace | reporty nejdou přes zvolené rozhraní. Ověř je: `sudo tcpdump -i wg0 -nn 'tcp port 8080'` (do 15 s musí přijít `POST /register`). Zkontroluj `list_in_directory = 1` ve `spyserver.config`. |
+| `guard: firewall init failed … Operation not permitted` | v `ssmon.service` chybí `CAP_NET_ADMIN` v `AmbientCapabilities` a `CapabilityBoundingSet`. |
+| `guard: firewall init failed … nft: executable file not found` | nainstaluj balík `nftables` (stačí příkaz `nft`). |
+| `/etc/ssmon/ssmon.conf:12: unknown setting "…"` | překlep v `ssmon.conf`; číslo řádku je ve zprávě. |
+| v tabulce relací nejsou jména klientů | mají je jen nová připojení. Ověř, že provoz klientů jde přes rozhraní: `sudo tcpdump -i wg0 -nn -c 5 'tcp dst port 5555'`, jinak nastav `spyserver_port`. |
 | služba „loaded“, ale web neběží | `systemctl status ssmon` ukáže `activating (auto-restart)`, příčinu najdeš v `journalctl -u ssmon -n 30`. |
 
 Test bez živého provozu: zachycený provoz (`sudo tcpdump -i wg0 -w reporty.pcap 'tcp port 8080'`)
@@ -468,6 +618,10 @@ lze přehrát: `./ssmon -pcap reporty.pcap -db ./test.db -iface "" -listen ""`.
 | `capture.go` | `AF_PACKET` + BPF filtr, přehrávání pcap, skládání TCP, parser reportu |
 | `monitor.go` | logika relací, schéma a zápisy do SQLite, anonymizace, zpětné doplnění GeoIP |
 | `stats.go` | dotazy pro dashboard (agregace, relace, průběh ladění) |
+| `guard.go` | ochrana: sledování spojení, dekódování HELLO, pravidla, bany a události |
+| `config.go` | parser `ssmon.conf` |
+| `firewall.go` | tabulka a sada banů v nftables |
+| `admin.go` | přihlášení správce (PBKDF2 hash hesla, relace) a admin API |
 | `web.go` | HTTP server a API, zabudované statické soubory |
 | `geo.go`, `mmdb.go` | GeoIP: vlastní čtečka formátu MaxMind DB |
 | `bands.go`, `bands.txt` | tabulka pásem a její načítání |
@@ -475,6 +629,7 @@ lze přehrát: `./ssmon -pcap reporty.pcap -db ./test.db -iface "" -listen ""`.
 | `web/index.html` | dashboard (HTML/CSS/JS bez frameworku, texty CZ/EN) |
 | `web/leaflet/` | Leaflet 1.9.4 (mapa) |
 | `ssmon.service` | systemd unit |
+| `ssmon.conf.example` | šablona pravidel ochrany a přihlášení správce s komentáři |
 | `update-geoip.sh` | stažení a aktualizace DB-IP Lite |
 
 ---

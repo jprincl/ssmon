@@ -32,6 +32,9 @@ whitelist_clients = SDR++, SDR#
 # one from the same IP ended (e.g. auto-reconnect after the session limit).
 reconnect_action = ban
 reconnect_window = 2s
+# only a previous connection that lasted at least this long counts; retries
+# against a full server are rejected within a second and are ignored
+reconnect_min_session = 30s
 # how many fast reconnects within reconnect_period trigger the rule
 reconnect_count = 1
 reconnect_period = 10m

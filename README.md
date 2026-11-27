@@ -16,8 +16,10 @@ running.
 - offline IP geolocation (DB-IP Lite / GeoLite2 MMDB files), no external APIs,
 - a kernel BPF filter passes only report packets to the program, so the IQ stream on the same
   interface costs nothing,
-- runs as an unprivileged user with a single capability (`CAP_NET_RAW`), ~10–20 MB RAM,
-- bilingual dashboard (English / Czech), switchable with flags.
+- runs as an unprivileged user with only `CAP_NET_RAW` (plus `CAP_NET_ADMIN` when bans are used),
+- bilingual dashboard (English / Czech), switchable with flags,
+- optional **protection against abuse**: automatic bans (fast reconnect, unknown client, quota,
+  camping) and manual ban/unban from the dashboard after an admin login, enforced with nftables.
 
 ---
 
@@ -33,11 +35,12 @@ running.
 9. [GeoIP databases and updates](#geoip-databases-and-updates)
 10. [Bands (bands.txt)](#bands-bandstxt)
 11. [Dashboard](#dashboard)
-12. [Database](#database)
-13. [Maintenance and upgrades](#maintenance-and-upgrades)
-14. [Troubleshooting](#troubleshooting)
-15. [Project layout](#project-layout)
-16. [Licenses and attribution](#licenses-and-attribution)
+12. [Protection against abuse (guard)](#protection-against-abuse-guard)
+13. [Database](#database)
+14. [Maintenance and upgrades](#maintenance-and-upgrades)
+15. [Troubleshooting](#troubleshooting)
+16. [Project layout](#project-layout)
+17. [Licenses and attribution](#licenses-and-attribution)
 
 ---
 
@@ -123,7 +126,8 @@ timestamps.
 - **Time resolution is ~15 s** (the report interval). Sessions shorter than one interval may not
   show up at all, and durations are approximate.
 - **`MaxClients=1` is assumed**, i.e. a single IP in `CurrentClients`.
-- The client software version is not included in the reports.
+- The client software is not in the reports. ssmon reads it from the HELLO of each new streaming
+  connection instead (see [guard](#protection-against-abuse-guard)).
 - IPv4 only (reports and clients).
 
 ---
@@ -134,6 +138,7 @@ timestamps.
 - Linux with systemd (tested on Ubuntu), amd64 or arm64,
 - the interface carrying SpyServer's reports to the directory (e.g. `wg0` on the VPS),
 - `curl` and `gunzip` for downloading the GeoIP databases,
+- `nft` (package `nftables`) when bans are used,
 - optionally `sqlite3` for your own queries and backups.
 
 **Building:** Go ≥ 1.22 on any machine (Windows, Linux, macOS). Building on a small VPS with 1 GB
@@ -218,7 +223,7 @@ ssmon: geoip: loaded city database /opt/ssmon/geoip/dbip-city-lite.mmdb (DBIP-Ci
 ssmon: geoip: loaded ASN database /opt/ssmon/geoip/dbip-asn-lite.mmdb (DBIP-ASN-Lite ...)
 ssmon: database ./test.db: 0 sessions
 ssmon: dashboard on :8090
-ssmon: capturing directory reports on wg0, TCP port 8080
+ssmon: capturing on wg0: directory reports (TCP 8080), SpyServer clients (TCP 5555)
 ```
 
 Then connect to your SpyServer (SDR++, SDR#…). Within 15 s you should see
@@ -274,9 +279,10 @@ ExecStart=/usr/local/bin/ssmon \
     -listen :8090 \                       # dashboard on port 8090, all interfaces
     -initial-mhz 145 \                    # SpyServer initial_frequency (not counted)
     -bands /opt/ssmon/bands.txt \         # band plan
+    -config /etc/ssmon/ssmon.conf \       # guard rules + admin login (optional)
     -geoip-city /opt/ssmon/geoip/dbip-city-lite.mmdb \
     -geoip-asn /opt/ssmon/geoip/dbip-asn-lite.mmdb
-ExecReload=/bin/kill -HUP $MAINPID        # systemctl reload = reload GeoIP + backfill
+ExecReload=/bin/kill -HUP $MAINPID        # systemctl reload = reload GeoIP + config, backfill
 Restart=always                            # restart on crash
 RestartSec=5
 ```
@@ -288,14 +294,14 @@ RestartSec=5
 |---|---|
 | `DynamicUser=yes` | runs as a throwaway unprivileged user created by systemd |
 | `StateDirectory=ssmon` | systemd creates a writable `/var/lib/ssmon` (physically `/var/lib/private/ssmon`) |
-| `AmbientCapabilities=CAP_NET_RAW` | the only privilege: capturing packets from an interface |
-| `CapabilityBoundingSet=CAP_NET_RAW` | no other capability can be gained |
+| `AmbientCapabilities=CAP_NET_RAW CAP_NET_ADMIN` | `CAP_NET_RAW` = capturing packets from an interface; `CAP_NET_ADMIN` = managing the ban set in ssmon's own nftables table (only needed for bans) |
+| `CapabilityBoundingSet=CAP_NET_RAW CAP_NET_ADMIN` | no other capability can be gained |
 | `NoNewPrivileges=yes` | no privilege escalation |
 | `ProtectSystem=strict` | the whole system is read-only (except `StateDirectory`) |
 | `ProtectHome=yes`, `PrivateTmp=yes`, `PrivateDevices=yes` | no access to /home, private /tmp, no devices |
 | `ProtectKernelTunables/Modules`, `ProtectControlGroups` | no changes to the kernel or cgroups |
 | `RestrictAddressFamilies=AF_PACKET AF_NETLINK AF_INET AF_INET6 AF_UNIX` | allowed socket types: capture (`AF_PACKET`), interface lookup (`AF_NETLINK`), web and DNS |
-| `MemoryMax=200M` | safety net against memory leaks |
+| `MemoryMax=200M` | safety net against memory leaks. The DB-IP City database alone takes over 100 MB in memory, and a GeoIP `reload` briefly holds two copies, so `MemoryMax=400M` is the safer value. |
 
 After any change to the file: `sudo systemctl daemon-reload && sudo systemctl restart ssmon`.
 
@@ -317,9 +323,11 @@ After any change to the file: `sudo systemctl daemon-reload && sudo systemctl re
 | `-gap` | `45s` | close a session when no report mentions it for this long |
 | `-anonymize-after` | `0` | after N days, truncate IPs to /24 (IPv4) or /48 (IPv6); 0 = never |
 | `-pcap` | – | replay a `tcpdump -w` file into the database and exit (for testing) |
+| `-config` | – | `ssmon.conf` with guard rules and admin login (see [guard](#protection-against-abuse-guard)); without it the guard is off and the dashboard is read-only |
+| `-hash-password` | – | read a password from stdin, print the `admin_password_hash` line for `ssmon.conf` and exit |
 
-**Signals:** `SIGHUP` (`systemctl reload ssmon`) reloads the GeoIP databases and fills in location
-data for sessions that lack it. `SIGTERM`/`SIGINT` shut down cleanly.
+**Signals:** `SIGHUP` (`systemctl reload ssmon`) reloads the GeoIP databases and `ssmon.conf`, and
+fills in location data for sessions that lack it. `SIGTERM`/`SIGINT` shut down cleanly.
 
 ---
 
@@ -381,11 +389,13 @@ remembered in the browser.
 - **statistics:** countries, bands and frequencies (MHz) by listening time, activity by hour of day
   and by day, networks (ASN) with hosting/cloud networks tagged **DC**,
 - **session table:** filter (IP, city, country, network, `AS1234`, MHz, band name), pages of 50,
-  the last 6 frequencies in MHz, a **▸ N×** button with the full tuning history, and a tag for IPs
-  with 10 or more sessions in the period (typically bots),
+  the client name under each IP (e.g. `SDR++ · 2.0.1700`), the last 6 frequencies in MHz, a **▸ N×**
+  button with the full tuning history, and a tag for IPs with 10 or more sessions in the period
+  (typically bots),
 - period switch: 24 h / 7 days / 30 days / all.
 
-The dashboard has no login. **Restrict access with a firewall**, e.g.
+Viewing needs no login. Banning and unbanning are behind an admin login (see
+[Admin in the dashboard](#admin-in-the-dashboard)). **Restrict access with a firewall** anyway, e.g.
 `ufw allow from <your-IP> to any port 8090 proto tcp`, or bind it to a VPN interface only
 (`-listen 10.77.77.1:8090`).
 
@@ -399,6 +409,139 @@ The dashboard has no login. **Restrict access with a firewall**, e.g.
 
 All endpoints accept `lang=en` or `lang=cs` (default) for band names.
 
+Admin (session cookie required, POST also needs the `X-SSMon-Admin: 1` header):
+
+| endpoint | description |
+|---|---|
+| `GET /api/me` | login state and guard status |
+| `POST /api/login` `{"password": "…"}` / `POST /api/logout` | log in / out |
+| `GET /api/admin/bans` | active and ended bans |
+| `GET /api/admin/events?limit=100` | guard events |
+| `POST /api/admin/ban` `{"ip": "…", "hours": 24, "reason": "…"}` | manual ban (`hours: 0` = permanent) |
+| `POST /api/admin/unban` `{"ip": "…"}` | lift a ban |
+
+---
+
+## Protection against abuse (guard)
+
+Besides the directory reports, ssmon can watch the **client → SpyServer** direction of streaming
+connections (SYN/FIN/RST, ACKs and the first command). It reads the client name from the
+SpyServer HELLO and acts on the rules in `ssmon.conf`. Each rule is `off`, `flag` (event only) or
+`ban`. Bans are enforced by **ssmon's own nftables table**.
+
+| rule | key | default | catches |
+|---|---|---|---|
+| fast reconnect | `reconnect_*` | **ban** after 1 new connection ≤ 2 s after the previous one (lasting ≥ 30 s) ended | auto-reconnect after the session-limit kick, bots hammering the server |
+| unknown client | `unknown_client_action` | **ban** when the HELLO name contains none of `whitelist_clients`, or there is no HELLO | non-standard clients |
+| quota | `quota_*` | flag when one IP is connected > 90 min within 3 h | going round the session limit |
+| camping | `camp_*` | flag when the same MHz is held > 2 h | camping on one frequency |
+
+> **Why ssmon showed "2-hour sessions" despite a 30-minute limit:** SpyServer did kick the client,
+> but it reconnected within a second, and the 15 s directory reports never showed a gap. The
+> fast-reconnect rule catches exactly this.
+
+**Automatic bans escalate** per repeat offense of the same IP within `ban_memory`, using the list in
+`ban_durations` (all rules share one list, and manual bans count as previous offenses too). For
+example, `ban_durations = 10m, 1h, 2h, 6h, 24h, 7d` gives 10 minutes for the first offense and
+7 days from the sixth one on. `whitelist_ips` are never banned automatically (the event is
+recorded as "whitelist"). With `dry_run = true` nothing is banned: events only say what *would*
+have happened.
+
+**How a ban works:** `table inet ssmon` holds the set `banned` (each element has its own timeout)
+and a rule in `prerouting` at priority `raw` (-300), i.e. before conntrack and DNAT:
+`ip saddr @banned tcp dport <ban_port> drop`. Only the SpyServer port is blocked, so SSH is never
+at risk. A running stream of a banned IP stops at once, and temporary bans expire in the kernel by
+themselves. The table is independent of ufw, is rebuilt from the database at every start, and stays
+in place when ssmon stops.
+
+### ssmon.conf
+
+`ssmon.conf.example` is a commented template. Format: `key = value`, `#` comments, lists separated
+by commas, durations like `30s`, `10m`, `1h30m`, `7d`. Unknown keys are an error, so typos are
+caught at start.
+
+| key | default | meaning |
+|---|---|---|
+| `admin_password_hash` | – | dashboard admin login (`ssmon -hash-password`); empty = read-only dashboard |
+| `guard_enabled` | `false` | master switch for the rules |
+| `dry_run` | `true` | record what would be banned, do not ban |
+| `firewall` | `nft` | `nft` = enforce bans, `none` = record only |
+| `spyserver_port` | `5555` | SpyServer port as seen on the capture interface (`-iface`); a change needs a restart |
+| `ban_port` | `5555` | public port blocked for banned IPs (before DNAT) |
+| `whitelist_ips` | – | IPs/CIDRs never banned automatically |
+| `whitelist_clients` | `SDR++, SDR#` | allowed clients: the HELLO name must **contain** one of them (case-insensitive) |
+| `reconnect_action` / `_window` / `_count` / `_period` | `ban` / `2s` / `1` / `10m` | fast reconnect: `count` reconnects within `window` after a disconnect, within `period` |
+| `reconnect_min_session` | `30s` | only a previous connection lasting at least this long counts. When the server is full, SpyServer rejects the connection within a second, so repeated attempts to get in are not punished. |
+| `unknown_client_action` | `ban` | unknown client name or no HELLO |
+| `quota_action` / `_time` / `_window` | `flag` / `90m` / `3h` | connected time per IP in a sliding window |
+| `camp_action` / `_time` | `flag` / `2h` | same MHz held too long |
+| `ban_durations` | `1h, 24h, 7d` | automatic ban length per offense; `permanent` = never expires |
+| `ban_memory` | `30d` | how long earlier bans count as previous offenses |
+
+### Setup
+
+```sh
+sudo apt install -y nftables       # only the nft command; do NOT enable nftables.service
+                                   # (its /etc/nftables.conf starts with "flush ruleset")
+sudo mkdir -p /etc/ssmon
+sudo cp ssmon.conf.example /etc/ssmon/ssmon.conf
+sudo chmod 644 /etc/ssmon/ssmon.conf   # the service user must be able to read it
+/usr/local/bin/ssmon -hash-password    # paste the printed line into ssmon.conf
+sudo nano /etc/ssmon/ssmon.conf        # whitelist_ips = your IP(s); keep dry_run = true at first
+```
+
+The service needs `-config /etc/ssmon/ssmon.conf` and the capabilities
+`CAP_NET_RAW CAP_NET_ADMIN` (see [The ssmon.service file](#the-ssmonservice-file)). Then:
+
+```sh
+sudo systemctl daemon-reload && sudo systemctl restart ssmon
+journalctl -u ssmon -n 20 --no-pager   # "guard: firewall nft ready (ban port 5555), N active bans restored"
+sudo nft list table inet ssmon
+```
+
+Check that client traffic passes the capture interface:
+`sudo tcpdump -i wg0 -nn -c 5 'tcp dst port 5555'`. If SpyServer uses another port, set
+`spyserver_port` (port on the capture interface) and `ban_port` (public port before DNAT, see
+`sudo iptables -t nat -S | grep DNAT`).
+
+Run in dry-run for a few days and look at the events in the dashboard. Then set
+`dry_run = false` and run `sudo systemctl reload ssmon`. The config is reloaded without a restart.
+
+A gentler setup, for example: ban only fast reconnects automatically and flag the rest:
+```
+dry_run = false
+unknown_client_action = flag
+ban_durations = 10m, 1h, 2h, 6h, 24h, 7d
+ban_memory = 7d
+```
+
+### Admin in the dashboard
+
+With `admin_password_hash` set, a **🔒 Admin** button appears in the header. After login:
+- the session table has a **⛔** button next to every IP and a **BAN** tag on banned IPs,
+- the **SpyServer protection** panel shows the guard status (on/off, dry-run, firewall), a field for
+  banning any IP, the **active bans** with **Unban**, the **ended bans**, and the **recent events**
+  (ban, flagged, dry-run, whitelist, unban).
+
+A **manual ban** lasts exactly what you pick in the dialog: 1 hour, 24 hours (preselected),
+7 days, 30 days or permanent (until unbanned). It does not use `ban_durations`, but it counts as a
+previous offense for later automatic bans.
+
+The login is a session cookie (HttpOnly, SameSite=Strict, 12 h; a restart logs you out). After
+5 failed attempts from one IP within 15 min, further logins are refused for a while. Every action
+also needs the `X-SSMon-Admin` header (CSRF protection). The dashboard runs over plain HTTP, so keep
+port 8090 restricted (ufw to your IP, VPN) or put it behind HTTPS (e.g. Caddy).
+
+### Notes
+
+- **Client names** (e.g. `SDR++ · 2.0.1700`, name and protocol version) are shown under the IP in
+  the session table, even with the guard switched off. They appear only for connections that start
+  while ssmon is running. A stream that was already running at ssmon's start has no HELLO to read,
+  so the client rule skips it.
+- A client name can be faked. The client whitelist stops naive bots and odd clients, not a
+  determined attacker. The fast-reconnect rule does not depend on the name.
+- IPv4 only. Rule details in the events are in English.
+
 ---
 
 ## Database
@@ -409,9 +552,11 @@ journal); do not delete them while the service is running. The directory is acce
 
 | table | contents |
 |---|---|
-| `sessions` | one row per session: `ip`, `start`, `last_seen` (unix time), `reports`, `open`, `cc`, `country`, `city`, `lat`, `lon`, `asn`, `org` |
+| `sessions` | one row per session: `ip`, `start`, `last_seen` (unix time), `reports`, `open`, `cc`, `country`, `city`, `lat`, `lon`, `asn`, `org`, `client` |
 | `tunings` | frequency changes in a session: `session_id`, `ts`, `freq` (Hz, exact value from the report) |
 | `kv` | the last report (`status`) and the time of the last start |
+| `bans` | bans: `ip`, `created`, `expires` (NULL = permanent), `lifted` (unbanned or replaced), `reason`, `rule`, `auto` |
+| `events` | guard events: `ts`, `ip`, `rule`, `action` (ban, flag, dry-run, whitelisted, unban), `detail` |
 
 Example queries (`sudo apt install sqlite3`):
 ```sh
@@ -441,11 +586,15 @@ after 90 days. Location and network are kept, so the statistics lose nothing imp
 | new version | `sudo install -m 755 ssmon /usr/local/bin/ssmon && sudo systemctl restart ssmon` |
 | change options | edit `/etc/systemd/system/ssmon.service`, then `sudo systemctl daemon-reload && sudo systemctl restart ssmon` |
 | change bands | edit `/opt/ssmon/bands.txt`, then `sudo systemctl restart ssmon` |
+| change guard rules / admin password | edit `/etc/ssmon/ssmon.conf`, then `sudo systemctl reload ssmon` |
+| list bans in the firewall | `sudo nft list set inet ssmon banned` |
 | update GeoIP | `sudo /opt/ssmon/update-geoip.sh` (normally from cron) |
 | log | `journalctl -u ssmon -f` |
 | status | `systemctl status ssmon --no-pager` |
 
-The database schema is created at startup if missing. New versions work with existing databases.
+The database schema is created at startup if missing, and new columns and tables are added
+automatically. New versions work with existing databases, and an older version still runs on a
+newer database (it ignores what it does not know).
 
 ---
 
@@ -460,6 +609,10 @@ The database schema is created at startup if missing. New versions work with exi
 | `geoip: no database loaded` | the `-geoip-city`/`-geoip-asn` options or the files are missing. Run `update-geoip.sh`. |
 | `route ip+net: no such network interface` | wrong interface name in `-iface` (`ip -br link`, `sudo wg show`). |
 | dashboard "Offline", no sessions | the reports do not pass through the chosen interface. Check with `sudo tcpdump -i wg0 -nn 'tcp port 8080'` (a `POST /register` must show up within 15 s). Check `list_in_directory = 1` in `spyserver.config`. |
+| `guard: firewall init failed … Operation not permitted` | `CAP_NET_ADMIN` is missing in `AmbientCapabilities` and `CapabilityBoundingSet` of `ssmon.service`. |
+| `guard: firewall init failed … nft: executable file not found` | install the `nftables` package (only the `nft` command is needed). |
+| `/etc/ssmon/ssmon.conf:12: unknown setting "…"` | typo in `ssmon.conf`; the line number is in the message. |
+| no client names in the session table | only new connections have one. Check that client traffic passes the interface: `sudo tcpdump -i wg0 -nn -c 5 'tcp dst port 5555'`, otherwise set `spyserver_port`. |
 | service "loaded" but the web UI is down | `systemctl status ssmon` shows `activating (auto-restart)`; the cause is in `journalctl -u ssmon -n 30`. |
 
 Testing without live traffic: captured traffic (`sudo tcpdump -i wg0 -w reports.pcap 'tcp port 8080'`)
@@ -475,6 +628,10 @@ can be replayed with `./ssmon -pcap reports.pcap -db ./test.db -iface "" -listen
 | `capture.go` | `AF_PACKET` + BPF filter, pcap replay, TCP reassembly, report parser |
 | `monitor.go` | session logic, SQLite schema and writes, anonymization, GeoIP backfill |
 | `stats.go` | dashboard queries (aggregations, sessions, tuning history) |
+| `guard.go` | guard: connection tracking, HELLO decoding, rules, bans and events |
+| `config.go` | `ssmon.conf` parser |
+| `firewall.go` | nftables table and ban set |
+| `admin.go` | admin login (PBKDF2 password hash, sessions) and admin API |
 | `web.go` | HTTP server and API, embedded static files |
 | `geo.go`, `mmdb.go` | GeoIP: own reader for the MaxMind DB format |
 | `bands.go`, `bands.txt` | band plan and its loader |
@@ -482,6 +639,7 @@ can be replayed with `./ssmon -pcap reports.pcap -db ./test.db -iface "" -listen
 | `web/index.html` | dashboard (plain HTML/CSS/JS, no framework, EN/CS strings) |
 | `web/leaflet/` | Leaflet 1.9.4 (map) |
 | `ssmon.service` | systemd unit |
+| `ssmon.conf.example` | commented template for guard rules and admin login |
 | `update-geoip.sh` | DB-IP Lite download and update |
 
 ---
