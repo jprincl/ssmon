@@ -433,7 +433,7 @@ SpyServer HELLO and acts on the rules in `ssmon.conf`. Each rule is `off`, `flag
 |---|---|---|---|
 | fast reconnect | `reconnect_*` | **ban** after 1 new connection ≤ 2 s after the previous one (lasting ≥ 30 s) ended | auto-reconnect after the session-limit kick, bots hammering the server |
 | unknown client | `unknown_client_action` | **ban** when the HELLO name contains none of `whitelist_clients`, or there is no HELLO | non-standard clients |
-| quota | `quota_*` | flag when one IP is connected > 90 min within 3 h | going round the session limit |
+| quota | `quota_*` | flag when one IP is connected > 90 min within 3 h (checked only while it is connected) | going round the session limit |
 | camping | `camp_*` | flag when the same MHz is held > 2 h | camping on one frequency |
 
 > **Why ssmon showed "2-hour sessions" despite a 30-minute limit:** SpyServer did kick the client,

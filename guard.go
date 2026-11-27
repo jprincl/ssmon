@@ -11,6 +11,7 @@ package main
 //   - client:    the HELLO client name contains no whitelisted part, or
 //                the client sent something other than HELLO first,
 //   - quota:     total connected time per IP within a sliding window,
+//                checked only while the IP is connected,
 //   - camp:      the same MHz (from directory reports) for too long.
 // Each rule can be off, flag (event only) or ban. Bans escalate per repeat
 // offense and are enforced by the Firewall (nftables).
@@ -278,7 +279,10 @@ func (g *Guard) Tick(now time.Time) {
 		}
 		st.history = keep
 		total += open[ip]
-		if total > cfg.QuotaTime && !g.bannedNow(ip, now) {
+		// Only judge an IP that is connected right now. Otherwise an IP that
+		// used up its quota would be banned again each time a ban expires,
+		// without even trying to connect.
+		if open[ip] > 0 && total > cfg.QuotaTime && !g.bannedNow(ip, now) {
 			g.trigger(ip, "quota", cfg.QuotaAction,
 				fmt.Sprintf("connected %s within %s (limit %s)", fmtDur(total), fmtDur(cfg.QuotaWindow), fmtDur(cfg.QuotaTime)))
 		}

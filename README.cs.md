@@ -425,7 +425,7 @@ vynucuje **vlastní tabulka ssmonu v nftables**.
 |---|---|---|---|
 | rychlý reconnect | `reconnect_*` | **ban** po 1 novém připojení do 2 s po skončení předchozího (trvalo ≥ 30 s) | automatický reconnect po odpojení limitem relace, boty |
 | neznámý klient | `unknown_client_action` | **ban**, když jméno v HELLO neobsahuje nic z `whitelist_clients` nebo HELLO chybí | nestandardní klienty |
-| kvóta | `quota_*` | označit, když je IP připojená > 90 min za 3 h | obcházení limitu relace |
+| kvóta | `quota_*` | označit, když je IP připojená > 90 min za 3 h (kontroluje se jen během připojení) | obcházení limitu relace |
 | kempování | `camp_*` | označit, když se drží stejné MHz > 2 h | kempování na jedné frekvenci |
 
 > **Proč ssmon ukazoval „dvouhodinové relace“ i přes limit 30 minut:** SpyServer klienta odpojil,
