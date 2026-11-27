@@ -111,6 +111,48 @@
   .toggle input { accent-color: var(--accent); margin: 0; }
   .bars-more { margin-top: 8px; border: 0; background: none; color: var(--accent); font: 600 12.5px system-ui, sans-serif; padding: 2px 0; cursor: pointer; }
   .bars-more:hover { text-decoration: underline; }
+  .admin-btn { border: 1px solid var(--line); background: var(--panel); color: var(--text); border-radius: 8px;
+    padding: 6px 12px; font: inherit; cursor: pointer; white-space: nowrap; }
+  .admin-btn.on { border-color: var(--bad); color: var(--bad); }
+  .client { color: var(--muted); font-size: 11.5px; font-family: system-ui, sans-serif; white-space: nowrap; }
+  .ban-btn { border: 1px solid color-mix(in srgb, var(--bad) 40%, transparent); background: none; color: var(--bad);
+    border-radius: 5px; font: 600 11px system-ui, sans-serif; padding: 1px 6px; margin-left: 6px; cursor: pointer; }
+  .ban-btn:hover { background: color-mix(in srgb, var(--bad) 12%, transparent); }
+  .tag.banned { background: var(--bad); color: #fff; }
+  .admin-panel { margin-bottom: 16px; border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
+  .admin-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; }
+  .admin-head h2 { margin: 0; }
+  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+  .badge.ok { color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent); }
+  .badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
+  .badge.off { color: var(--muted); }
+  .admin-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; }
+  .admin-cols h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+  .mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  .mini td, .mini th { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
+  .mini th { font-size: 11.5px; }
+  .mini .detail-txt { color: var(--muted); max-width: 260px; overflow-wrap: anywhere; }
+  #events, #bans-active { max-height: 460px; overflow: auto; }
+  .act { display: inline-block; font: 600 10.5px system-ui, sans-serif; padding: 1px 6px; border-radius: 5px; text-transform: uppercase; }
+  .act.ban { background: var(--bad); color: #fff; }
+  .act.flag { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+  .act.dry-run { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+  .act.whitelisted, .act.unban { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+  .unban-btn { border: 1px solid var(--line); background: var(--panel); color: var(--accent); border-radius: 5px;
+    font: 600 11.5px system-ui, sans-serif; padding: 2px 8px; cursor: pointer; }
+  .manual-ban { display: flex; gap: 8px; margin-left: auto; }
+  .manual-ban input { width: 150px; padding: 5px 8px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12.5px; margin-top: 10px; }
+  dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--text); padding: 18px 20px; width: min(360px, 92vw); }
+  dialog::backdrop { background: rgb(0 0 0 / .45); }
+  dialog h3 { margin: 0 0 12px; font-size: 16px; }
+  dialog label { display: block; font-size: 12.5px; color: var(--muted); margin: 10px 0 4px; }
+  dialog input, dialog select { width: 100%; padding: 7px 9px; border-radius: 7px; border: 1px solid var(--line); background: var(--bg); color: var(--text); font: inherit; }
+  dialog .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  dialog button { border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 7px; padding: 6px 14px; font: inherit; cursor: pointer; }
+  dialog button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  dialog button.danger { background: var(--bad); border-color: var(--bad); color: #fff; }
+  dialog .err { color: var(--bad); font-size: 12.5px; min-height: 1.2em; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -129,6 +171,7 @@
       <button data-lang="cs" title="Čeština" aria-label="Čeština"><svg viewBox="0 0 6 4"><rect width="6" height="4" fill="#d7141a"/><rect width="6" height="2" fill="#fff"/><path d="M0 0 3 2 0 4z" fill="#11457e"/></svg></button>
       <button data-lang="en" title="English" aria-label="English"><svg viewBox="0 0 60 30"><clipPath id="uk-s"><path d="M0 0v30h60V0z"/></clipPath><clipPath id="uk-t"><path d="M30 15h30v15zv15H0zH0V0zV0h30z"/></clipPath><g clip-path="url(#uk-s)"><path d="M0 0v30h60V0z" fill="#012169"/><path d="M0 0l60 30m0-30L0 30" stroke="#fff" stroke-width="6"/><path d="M0 0l60 30m0-30L0 30" clip-path="url(#uk-t)" stroke="#C8102E" stroke-width="4"/><path d="M30 0v30M0 15h60" stroke="#fff" stroke-width="10"/><path d="M30 0v30M0 15h60" stroke="#C8102E" stroke-width="6"/></g></svg></button>
     </div>
+    <button class="admin-btn" id="admin-btn" hidden></button>
   </header>
 
   <div class="live" id="live"></div>
@@ -155,6 +198,43 @@
       <div class="axis" id="p-days-axis"></div></div>
     <div class="panel"><h2 data-i18n="pASN"></h2><div class="bars" id="p-asn"></div></div>
   </div>
+
+  <div class="panel admin-panel" id="admin-panel" hidden>
+    <div class="admin-head">
+      <h2 data-i18n="aTitle"></h2>
+      <span id="guard-badges"></span>
+      <form class="manual-ban" id="manual-ban">
+        <input id="manual-ip" data-i18n-placeholder="aIpPlaceholder" required pattern="[0-9.]+">
+        <button class="ban-btn" type="submit" data-i18n="aBanBtn"></button>
+      </form>
+    </div>
+    <div class="admin-cols">
+      <div><h3 data-i18n="aActive"></h3><div id="bans-active"></div>
+        <details><summary id="bans-past-sum"></summary><div id="bans-past"></div></details></div>
+      <div><h3 data-i18n="aEvents"></h3><div id="events"></div></div>
+    </div>
+  </div>
+
+  <dialog id="login-dlg"><form method="dialog" id="login-form">
+    <h3 data-i18n="loginTitle"></h3>
+    <label for="login-pw" data-i18n="loginPw"></label>
+    <input type="password" id="login-pw" autocomplete="current-password" required>
+    <div class="err" id="login-err"></div>
+    <div class="row"><button type="button" data-close data-i18n="cancel"></button><button class="primary" type="submit" data-i18n="loginBtn"></button></div>
+  </form></dialog>
+
+  <dialog id="ban-dlg"><form method="dialog" id="ban-form">
+    <h3><span data-i18n="banTitle"></span> <span class="mono" id="ban-ip"></span></h3>
+    <label for="ban-dur" data-i18n="banDur"></label>
+    <select id="ban-dur">
+      <option value="1" data-i18n="d1h"></option><option value="24" data-i18n="d24h" selected></option>
+      <option value="168" data-i18n="d7d"></option><option value="720" data-i18n="d30d"></option><option value="0" data-i18n="dPerm"></option>
+    </select>
+    <label for="ban-reason" data-i18n="banReason"></label>
+    <input id="ban-reason" maxlength="200">
+    <div class="err" id="ban-err"></div>
+    <div class="row"><button type="button" data-close data-i18n="cancel"></button><button class="danger" type="submit" data-i18n="aBanBtn"></button></div>
+  </form></dialog>
 
   <div class="panel">
     <div class="table-head"><h2 data-i18n="tSessions"></h2><div class="spacer"></div>
@@ -194,6 +274,18 @@ const I18N = {
     unavailable: (e) => `Dashboard nedostupný (${e})`,
     hideShort: "Skrýt relace ≤ 30 s", hiddenShort: (n) => `${n} krátkých relací skryto`,
     showAll: (n) => `Zobrazit vše (${n})`, showLess: "Zobrazit méně",
+    adminLogin: "🔒 Správa", adminLogout: "Odhlásit", loginTitle: "Přihlášení správce", loginPw: "Heslo", loginBtn: "Přihlásit",
+    cancel: "Zrušit", loginFail: "Špatné heslo", loginMany: "Příliš mnoho pokusů, zkus to později",
+    aTitle: "Ochrana SpyServeru", aActive: "Aktivní bany", aEvents: "Poslední události", aBanBtn: "Zabanovat",
+    aIpPlaceholder: "IP adresa", aPast: (n) => `Ukončené bany (${n})`, aNoBans: "Žádné aktivní bany", aNoEvents: "Zatím žádné události",
+    unban: "Odbanovat", banTitle: "Zabanovat", banDur: "Doba", banReason: "Důvod (nepovinné)",
+    d1h: "1 hodina", d24h: "24 hodin", d7d: "7 dní", d30d: "30 dní", dPerm: "Trvale",
+    permanent: "trvale", until: "do", since: "od", banned: "BAN", banTip: "Zabanovat tuto IP",
+    gOn: "ochrana zapnuta", gOff: "ochrana vypnuta", gDry: "jen sledování (dry-run)", gLive: "ostré banování", gNoFw: "firewall: jen log",
+    rule: { reconnect: "rychlý reconnect", client: "klient", quota: "kvóta", camp: "kempování", manual: "ručně" },
+    action: { ban: "ban", flag: "označeno", "dry-run": "dry-run", whitelisted: "whitelist", unban: "odban" },
+    thEvTime: "Čas", thEvIP: "IP", thEvRule: "Pravidlo", thEvDetail: "Detail", thBanReason: "Důvod", thBanUntil: "Platnost",
+    actionFail: (e) => `Akce selhala: ${e}`,
   },
   en: {
     title: "SpyServer – listeners", r24h: "24 h", r7d: "7 days", r30d: "30 days", rAll: "All",
@@ -215,6 +307,18 @@ const I18N = {
     unavailable: (e) => `Dashboard unavailable (${e})`,
     hideShort: "Hide sessions ≤ 30 s", hiddenShort: (n) => `${n} short sessions hidden`,
     showAll: (n) => `Show all (${n})`, showLess: "Show less",
+    adminLogin: "🔒 Admin", adminLogout: "Log out", loginTitle: "Admin login", loginPw: "Password", loginBtn: "Log in",
+    cancel: "Cancel", loginFail: "Wrong password", loginMany: "Too many attempts, try again later",
+    aTitle: "SpyServer protection", aActive: "Active bans", aEvents: "Recent events", aBanBtn: "Ban",
+    aIpPlaceholder: "IP address", aPast: (n) => `Ended bans (${n})`, aNoBans: "No active bans", aNoEvents: "No events yet",
+    unban: "Unban", banTitle: "Ban", banDur: "Duration", banReason: "Reason (optional)",
+    d1h: "1 hour", d24h: "24 hours", d7d: "7 days", d30d: "30 days", dPerm: "Permanent",
+    permanent: "permanent", until: "until", since: "since", banned: "BAN", banTip: "Ban this IP",
+    gOn: "protection on", gOff: "protection off", gDry: "watch only (dry-run)", gLive: "live banning", gNoFw: "firewall: log only",
+    rule: { reconnect: "fast reconnect", client: "client", quota: "quota", camp: "camping", manual: "manual" },
+    action: { ban: "ban", flag: "flagged", "dry-run": "dry-run", whitelisted: "whitelist", unban: "unban" },
+    thEvTime: "Time", thEvIP: "IP", thEvRule: "Rule", thEvDetail: "Detail", thBanReason: "Reason", thBanUntil: "Valid",
+    actionFail: (e) => `Action failed: ${e}`,
   },
 };
 const LOCALES = { cs: "cs-CZ", en: "en-GB" };
@@ -432,11 +536,12 @@ function renderTable() {
       shown.map((f) => `<span class="chip" title="${esc(f.band)} · ${dur(f.secs)}">${f.mhz}</span>`).join("");
     const more = s.tunings > 1
       ? `<button class="expand" data-id="${s.id}" title="${t("tuningHistory")}">${expanded.has(s.id) ? "▾" : "▸"} ${s.tunings}×</button>` : "";
-    const tags = (s.open && data && data.online ? '<span class="tag live">LIVE</span>' : "") +
+    const tags = (bannedIPs.has(s.ip) ? `<span class="tag banned">${t("banned")}</span>` : "") +
+      (s.open && data && data.online ? '<span class="tag live">LIVE</span>' : "") +
       (isDC(s.org) ? `<span class="tag dc" title="${t("dcTitle")}">DC</span>` : "") +
       (s.ip_sessions >= MANY_SESSIONS ? `<span class="tag many" title="${t("manyTitle", s.ip_sessions)}">${s.ip_sessions}×</span>` : "");
     return `<tr class="${s.lat != null ? "clickable" : ""}" data-idx="${idx}">
-      <td class="mono">${fmtTime(s.start)}</td><td>${dur(s.secs)}</td><td class="mono">${esc(s.ip)}</td>
+      <td class="mono">${fmtTime(s.start)}</td><td>${dur(s.secs)}</td><td><span class="mono">${esc(s.ip)}</span>${isAdmin && !bannedIPs.has(s.ip) && !s.ip.includes("/") ? `<button class="ban-btn" data-ban="${esc(s.ip)}" title="${t("banTip")}">⛔</button>` : ""}${s.client ? `<div class="client">${esc(s.client)}</div>` : ""}</td>
       <td>${flag(s.cc)} ${esc([s.city, s.cc].filter(Boolean).join(", ") || "–")}</td>
       <td class="muted">${esc(s.org || "–")}${s.asn ? ' <span class="mono">AS' + s.asn + "</span>" : ""}</td>
       <td>${chips || '<span class="muted">–</span>'} ${more}</td><td>${tags}</td></tr>` +
@@ -468,6 +573,7 @@ $("rows").addEventListener("click", (e) => {
     renderTable();
     return;
   }
+  if (e.target.closest("[data-ban]")) return; // handled by the ban dialog
   const tr = e.target.closest("tr[data-idx]");
   if (!tr) return;
   const m = markerFor(tableRows[+tr.dataset.idx]);
@@ -502,8 +608,116 @@ document.querySelectorAll("#lang button").forEach((b) => b.addEventListener("cli
   nf = new Intl.NumberFormat(LOCALES[lang]);
   try { localStorage.setItem("ssmon-lang", lang); } catch (e) {}
   applyStaticText();
+  loadMe();
   load(true); // band names come from the server in the selected language
 }));
+
+// ---- admin (login, bans, guard events) ----
+let isAdmin = false, adminEnabled = false, guardInfo = null;
+let bannedIPs = new Set();
+
+async function api(path, body) {
+  const opt = body === undefined ? { cache: "no-store" } :
+    { method: "POST", headers: { "Content-Type": "application/json", "X-SSMon-Admin": "1" }, body: JSON.stringify(body) };
+  const r = await fetch(path, opt);
+  let d = null;
+  try { d = await r.json(); } catch (e) {}
+  if (!r.ok) { const err = new Error((d && d.error) || r.status); err.status = r.status; throw err; }
+  return d;
+}
+
+async function loadMe() {
+  try {
+    const me = await api("api/me");
+    isAdmin = me.admin; adminEnabled = me.admin_enabled; guardInfo = me.guard;
+  } catch (e) { isAdmin = false; }
+  const b = $("admin-btn");
+  b.hidden = !adminEnabled;
+  b.textContent = isAdmin ? t("adminLogout") : t("adminLogin");
+  b.classList.toggle("on", isAdmin);
+  $("admin-panel").hidden = !isAdmin;
+  if (!isAdmin) bannedIPs = new Set();
+}
+
+function fmtUntil(b) {
+  if (!b.expires) return t("permanent");
+  return t("until") + " " + fmtTime(b.expires);
+}
+
+function banTable(list, withUnban) {
+  return `<table class="mini"><thead><tr><th>IP</th><th>${t("thEvRule")}</th><th>${t("thBanReason")}</th><th>${t("thBanUntil")}</th>${withUnban ? "<th></th>" : ""}</tr></thead><tbody>` +
+    list.map((b) => `<tr><td><span class="mono">${esc(b.ip)}</span><div class="client">${flag(b.cc)} ${esc(b.org || "")}</div></td>
+      <td>${esc(t("rule")[b.rule] || b.rule)}</td><td class="detail-txt">${esc(b.reason)}</td>
+      <td>${withUnban ? fmtUntil(b) : t("since") + " " + fmtTime(b.created)}</td>
+      ${withUnban ? `<td><button class="unban-btn" data-unban="${esc(b.ip)}">${t("unban")}</button></td>` : ""}</tr>`).join("") + "</tbody></table>";
+}
+
+async function loadAdmin() {
+  if (!isAdmin) return;
+  try {
+    const [bans, ev] = await Promise.all([api("api/admin/bans"), api("api/admin/events?limit=60")]);
+    bannedIPs = new Set(bans.active.map((b) => b.ip));
+    $("bans-active").innerHTML = bans.active.length ? banTable(bans.active, true) : `<div class="empty">${t("aNoBans")}</div>`;
+    $("bans-past-sum").textContent = t("aPast", bans.past.length);
+    $("bans-past").innerHTML = bans.past.length ? banTable(bans.past, false) : "";
+    $("events").innerHTML = ev.events.length ? `<table class="mini"><thead><tr><th>${t("thEvTime")}</th><th></th><th>IP</th><th>${t("thEvRule")}</th><th>${t("thEvDetail")}</th></tr></thead><tbody>` +
+      ev.events.map((e) => `<tr><td class="mono">${fmtTime(e.ts)}</td><td><span class="act ${esc(e.action)}">${esc(t("action")[e.action] || e.action)}</span></td>
+        <td class="mono">${esc(e.ip)}</td><td>${esc(t("rule")[e.rule] || e.rule)}</td><td class="detail-txt">${esc(e.detail)}</td></tr>`).join("") + "</tbody></table>"
+      : `<div class="empty">${t("aNoEvents")}</div>`;
+    const g = guardInfo || {};
+    $("guard-badges").innerHTML = (g.enabled ? `<span class="badge ok">${t("gOn")}</span> ` : `<span class="badge off">${t("gOff")}</span> `) +
+      (g.enabled ? (g.dry_run ? `<span class="badge warn">${t("gDry")}</span> ` : `<span class="badge ok">${t("gLive")}</span> `) : "") +
+      (g.firewall === "none" ? `<span class="badge warn">${t("gNoFw")}</span>` : "");
+  } catch (e) {
+    if (e.status === 401) { await loadMe(); }
+  }
+}
+
+function openBan(ip) {
+  $("ban-ip").textContent = ip;
+  $("ban-reason").value = "";
+  $("ban-err").textContent = "";
+  $("ban-dlg").showModal();
+}
+
+$("admin-btn").addEventListener("click", async () => {
+  if (isAdmin) {
+    await api("api/logout", {}).catch(() => {});
+    await loadMe(); renderTable();
+    return;
+  }
+  $("login-pw").value = ""; $("login-err").textContent = "";
+  $("login-dlg").showModal();
+});
+document.querySelectorAll("dialog [data-close]").forEach((b) => b.addEventListener("click", () => b.closest("dialog").close()));
+$("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("api/login", { password: $("login-pw").value });
+    $("login-dlg").close();
+    await loadMe(); await loadAdmin(); renderTable();
+  } catch (err) {
+    $("login-err").textContent = err.status === 429 ? t("loginMany") : t("loginFail");
+  }
+});
+$("ban-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  try {
+    await api("api/admin/ban", { ip: $("ban-ip").textContent, hours: +$("ban-dur").value, reason: $("ban-reason").value });
+    $("ban-dlg").close();
+  } catch (err) { $("ban-err").textContent = t("actionFail", err.message); }
+  await loadAdmin(); renderTable();
+});
+$("manual-ban").addEventListener("submit", (e) => { e.preventDefault(); openBan($("manual-ip").value.trim()); });
+document.addEventListener("click", async (e) => {
+  const ban = e.target.closest("[data-ban]");
+  if (ban) { e.stopPropagation(); openBan(ban.dataset.ban); return; }
+  const un = e.target.closest("[data-unban]");
+  if (un) {
+    try { await api("api/admin/unban", { ip: un.dataset.unban }); } catch (err) { alert(t("actionFail", err.message)); }
+    await loadAdmin(); renderTable();
+  }
+});
 
 async function load(resetTable) {
   try {
@@ -511,6 +725,7 @@ async function load(resetTable) {
     if (!r.ok) throw new Error(r.status);
     data = await r.json();
     render();
+    await loadAdmin();
     // Refresh the table only while the user is looking at its first page.
     if (resetTable || tableRows.length <= PAGE) await loadTable(false);
   } catch (e) {
@@ -522,7 +737,7 @@ async function load(resetTable) {
 applyStaticText();
 $("srv-text").textContent = t("loading");
 initMap();
-load(true);
+loadMe().then(() => load(true));
 setInterval(() => load(false), 15000);
 </script>
 </body>
