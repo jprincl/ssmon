@@ -510,7 +510,8 @@ ban_memory = 7d
 Když je nastavený `admin_password_hash`, objeví se v hlavičce tlačítko **🔒 Správa**. Po přihlášení:
 - v tabulce relací je u každé IP tlačítko **⛔** a zabanované IP mají štítek **BAN**,
 - panel **Ochrana SpyServeru** ukazuje stav ochrany (zapnuto/vypnuto, dry-run, firewall) a obsahuje
-  pole pro ban libovolné IP, **aktivní bany** s tlačítkem **Odbanovat**, **ukončené bany**
+  pole pro ban libovolné IP, **aktivní bany** s tlačítkem **Odbanovat** (u každého je délka, stupeň
+  v řadě `ban_durations`, např. `stupeň 2/6`, a délka příštího automatického banu té IP), **ukončené bany**
   a **poslední události** (ban, označeno, dry-run, whitelist, odban).
 
 **Ruční ban** trvá přesně tak dlouho, jak vybereš v dialogu: 1 hodina, 24 hodin (předvolené),

@@ -505,6 +505,13 @@ type BanRow struct {
 	Active  bool    `json:"active"`
 	CC      string  `json:"cc"`
 	Org     string  `json:"org"`
+	// Position in the escalation series: this was the Level-th ban of the IP
+	// within ban_memory (manual bans included). Steps = len(ban_durations).
+	Level int `json:"level"`
+	Steps int `json:"steps"`
+	// Length of the next automatic ban of this IP (seconds, 0 = permanent);
+	// only filled in for active bans.
+	Next float64 `json:"next"`
 }
 
 func (g *Guard) activeBans(now time.Time) []BanRow {
@@ -516,6 +523,23 @@ func (g *Guard) BanLists() (active, past []BanRow) {
 	now := float64(time.Now().Unix())
 	active = g.queryBans(`lifted IS NULL AND (expires IS NULL OR expires > ?)`, 500, now)
 	past = g.queryBans(`NOT (lifted IS NULL AND (expires IS NULL OR expires > ?))`, 30, now)
+	g.mu.Lock()
+	cfg := g.cfg
+	g.mu.Unlock()
+	mem := cfg.BanMemory.Seconds()
+	for _, list := range [][]BanRow{active, past} {
+		for i := range list {
+			b := &list[i]
+			g.db.QueryRow(`SELECT count(*) FROM bans WHERE ip = ? AND created <= ? AND created >= ?`,
+				b.IP, b.Created, b.Created-mem).Scan(&b.Level)
+			b.Steps = len(cfg.BanDurations)
+		}
+	}
+	for i := range active {
+		g.mu.Lock()
+		active[i].Next = g.nextBanDuration(active[i].IP, time.Now()).Seconds()
+		g.mu.Unlock()
+	}
 	return
 }
 

@@ -520,7 +520,8 @@ ban_memory = 7d
 With `admin_password_hash` set, a **🔒 Admin** button appears in the header. After login:
 - the session table has a **⛔** button next to every IP and a **BAN** tag on banned IPs,
 - the **SpyServer protection** panel shows the guard status (on/off, dry-run, firewall), a field for
-  banning any IP, the **active bans** with **Unban**, the **ended bans**, and the **recent events**
+  banning any IP, the **active bans** with **Unban** (each shows its length, its step in
+  `ban_durations`, e.g. `step 2/6`, and how long the IP's next automatic ban would be), the **ended bans**, and the **recent events**
   (ban, flagged, dry-run, whitelist, unban).
 
 A **manual ban** lasts exactly what you pick in the dialog: 1 hour, 24 hours (preselected),
