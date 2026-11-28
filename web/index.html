@@ -122,17 +122,22 @@
   .admin-panel { margin-bottom: 16px; border-color: color-mix(in srgb, var(--bad) 35%, var(--line)); }
   .admin-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin-bottom: 12px; }
   .admin-head h2 { margin: 0; }
-  .badge { font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
+  .badge { white-space: nowrap; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); }
   .badge.ok { color: var(--live); border-color: color-mix(in srgb, var(--live) 40%, transparent); }
   .badge.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, transparent); }
   .badge.off { color: var(--muted); }
-  .admin-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 16px; }
-  .admin-cols h3 { font-size: 12.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 8px; }
+  .admin-tabs { display: flex; flex-wrap: nowrap; overflow-x: auto; gap: 4px; border-bottom: 1px solid var(--line); margin: 4px 0 10px; }
+  .admin-tabs button { border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); padding: 7px 12px; margin-bottom: -1px; font: 600 12.5px system-ui, sans-serif; text-transform: uppercase; letter-spacing: .04em; cursor: pointer; white-space: nowrap; }
+  .admin-tabs button:hover { color: var(--text); }
+  .admin-tabs button.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .admin-tabs .cnt { display: inline-block; min-width: 18px; margin-left: 6px; padding: 0 5px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); font-size: 11px; color: var(--muted); text-align: center; }
+  .admin-tabs .cnt.hot { background: var(--bad); border-color: var(--bad); color: #fff; }
   .mini { width: 100%; border-collapse: collapse; font-size: 12.5px; }
   .mini td, .mini th { padding: 5px 6px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: left; }
   .mini th { font-size: 11.5px; }
-  .mini .detail-txt { color: var(--muted); max-width: 260px; overflow-wrap: anywhere; }
-  #events, #bans-active { max-height: 460px; overflow: auto; }
+  .mini .detail-txt { color: var(--muted); max-width: 520px; overflow-wrap: anywhere; }
+  .admin-tab { max-height: 520px; overflow: auto; }
+  .admin-tab .mini { min-width: 680px; } /* scroll sideways on phones instead of squeezing */
   .act { display: inline-block; font: 600 10.5px system-ui, sans-serif; padding: 1px 6px; border-radius: 5px; text-transform: uppercase; }
   .act.ban { background: var(--bad); color: #fff; }
   .act.flag { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
@@ -208,11 +213,14 @@
         <button class="ban-btn" type="submit" data-i18n="aBanBtn"></button>
       </form>
     </div>
-    <div class="admin-cols">
-      <div><h3 data-i18n="aActive"></h3><div id="bans-active"></div>
-        <details><summary id="bans-past-sum"></summary><div id="bans-past"></div></details></div>
-      <div><h3 data-i18n="aEvents"></h3><div id="events"></div></div>
+    <div class="admin-tabs" id="admin-tabs" role="tablist">
+      <button type="button" role="tab" data-tab="bans-active"><span data-i18n="aActive"></span><span class="cnt" id="cnt-active">0</span></button>
+      <button type="button" role="tab" data-tab="events"><span data-i18n="aEvents"></span><span class="cnt" id="cnt-events">0</span></button>
+      <button type="button" role="tab" data-tab="bans-past"><span data-i18n="aPastTab"></span><span class="cnt" id="cnt-past">0</span></button>
     </div>
+    <div class="admin-tab" id="bans-active" role="tabpanel"></div>
+    <div class="admin-tab" id="events" role="tabpanel" hidden></div>
+    <div class="admin-tab" id="bans-past" role="tabpanel" hidden></div>
   </div>
 
   <dialog id="login-dlg"><form method="dialog" id="login-form">
@@ -277,7 +285,7 @@ const I18N = {
     adminLogin: "🔒 Správa", adminLogout: "Odhlásit", loginTitle: "Přihlášení správce", loginPw: "Heslo", loginBtn: "Přihlásit",
     cancel: "Zrušit", loginFail: "Špatné heslo", loginMany: "Příliš mnoho pokusů, zkus to později",
     aTitle: "Ochrana SpyServeru", aActive: "Aktivní bany", aEvents: "Poslední události", aBanBtn: "Zabanovat",
-    aIpPlaceholder: "IP adresa", aPast: (n) => `Ukončené bany (${n})`, aNoBans: "Žádné aktivní bany", aNoEvents: "Zatím žádné události",
+    aIpPlaceholder: "IP adresa", aPastTab: "Ukončené bany", aNoPast: "Žádné ukončené bany", aNoBans: "Žádné aktivní bany", aNoEvents: "Zatím žádné události",
     unban: "Odbanovat", banTitle: "Zabanovat", banDur: "Doba", banReason: "Důvod (nepovinné)",
     d1h: "1 hodina", d24h: "24 hodin", d7d: "7 dní", d30d: "30 dní", dPerm: "Trvale",
     permanent: "trvale", until: "do", since: "od", banned: "BAN", banTip: "Zabanovat tuto IP",
@@ -311,7 +319,7 @@ const I18N = {
     adminLogin: "🔒 Admin", adminLogout: "Log out", loginTitle: "Admin login", loginPw: "Password", loginBtn: "Log in",
     cancel: "Cancel", loginFail: "Wrong password", loginMany: "Too many attempts, try again later",
     aTitle: "SpyServer protection", aActive: "Active bans", aEvents: "Recent events", aBanBtn: "Ban",
-    aIpPlaceholder: "IP address", aPast: (n) => `Ended bans (${n})`, aNoBans: "No active bans", aNoEvents: "No events yet",
+    aIpPlaceholder: "IP address", aPastTab: "Ended bans", aNoPast: "No ended bans", aNoBans: "No active bans", aNoEvents: "No events yet",
     unban: "Unban", banTitle: "Ban", banDur: "Duration", banReason: "Reason (optional)",
     d1h: "1 hour", d24h: "24 hours", d7d: "7 days", d30d: "30 days", dPerm: "Permanent",
     permanent: "permanent", until: "until", since: "since", banned: "BAN", banTip: "Ban this IP",
@@ -679,14 +687,34 @@ function banTable(list, withUnban) {
       ${withUnban ? `<td><button class="unban-btn" data-unban="${esc(b.ip)}">${t("unban")}</button></td>` : ""}</tr>`).join("") + "</tbody></table>";
 }
 
+// Admin panel tabs; the chosen tab is remembered per browser.
+function showAdminTab(id) {
+  document.querySelectorAll("#admin-tabs button").forEach((b) => {
+    const on = b.dataset.tab === id;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on);
+    $(b.dataset.tab).hidden = !on;
+  });
+  try { localStorage.setItem("ssmon-admin-tab", id); } catch (e) {}
+}
+document.querySelectorAll("#admin-tabs button").forEach((b) => b.addEventListener("click", () => showAdminTab(b.dataset.tab)));
+{
+  let saved = "bans-active";
+  try { saved = localStorage.getItem("ssmon-admin-tab") || saved; } catch (e) {}
+  showAdminTab(document.querySelector(`#admin-tabs button[data-tab="${saved}"]`) ? saved : "bans-active");
+}
+
 async function loadAdmin() {
   if (!isAdmin) return;
   try {
     const [bans, ev] = await Promise.all([api("api/admin/bans"), api("api/admin/events?limit=60")]);
     bannedIPs = new Set(bans.active.map((b) => b.ip));
     $("bans-active").innerHTML = bans.active.length ? banTable(bans.active, true) : `<div class="empty">${t("aNoBans")}</div>`;
-    $("bans-past-sum").textContent = t("aPast", bans.past.length);
-    $("bans-past").innerHTML = bans.past.length ? banTable(bans.past, false) : "";
+    $("bans-past").innerHTML = bans.past.length ? banTable(bans.past, false) : `<div class="empty">${t("aNoPast")}</div>`;
+    $("cnt-active").textContent = bans.active.length;
+    $("cnt-active").classList.toggle("hot", bans.active.length > 0);
+    $("cnt-events").textContent = ev.events.length;
+    $("cnt-past").textContent = bans.past.length;
     $("events").innerHTML = ev.events.length ? `<table class="mini"><thead><tr><th>${t("thEvTime")}</th><th></th><th>IP</th><th>${t("thEvRule")}</th><th>${t("thEvDetail")}</th></tr></thead><tbody>` +
       ev.events.map((e) => `<tr><td class="mono">${fmtTime(e.ts)}</td><td><span class="act ${esc(e.action)}">${esc(t("action")[e.action] || e.action)}</span></td>
         <td class="mono">${esc(e.ip)}</td><td>${esc(t("rule")[e.rule] || e.rule)}</td><td class="detail-txt">${esc(e.detail)}</td></tr>`).join("") + "</tbody></table>"
